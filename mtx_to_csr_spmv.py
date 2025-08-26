@@ -160,8 +160,8 @@ int main() {{
     double *y = (double*)malloc({rows} * sizeof(double));
     double *x = (double*)malloc({cols} * sizeof(double));
     double *csr_val = (double*)malloc({nnz} * sizeof(double));
-    double *indices = (double*)malloc({nnz} * sizeof(double));
-    double *indptr = (double*)malloc(({rows} + 1) * sizeof(double));
+    int *indices = (int*)malloc({nnz} * sizeof(int));
+    int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
     struct timespec t1, t2;
     double times[100];
     for (int i=0; i<100; i++) {{
@@ -178,8 +178,8 @@ int main() {{
         memset(y, 0, sizeof(double)*{rows});
         memset(x, 0, sizeof(double)*{cols});
         memset(csr_val, 0, sizeof(double)*{nnz});
-        memset(indices, 0, sizeof(double)*{nnz});
-        memset(indptr, 0, sizeof(double)*({rows} + 1));
+        memset(indices, 0, sizeof(int)*{nnz});
+        memset(indptr, 0, sizeof(int)*({rows} + 1));
         char c;
 		int x_size=0, val_size=0;
 		assert(fscanf(file1, "indptr=[%c", &c) == 1);
