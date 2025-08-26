@@ -75,43 +75,6 @@ def read_csr_file(filepath):
         print(f"Error reading .csr file {filepath}: {e}")
         return None, None, None
 
-def convert_to_csr(matrix):
-    """Convert matrix to CSR format."""
-    # Convert to CSR format (mmread can return coo_matrix)
-    matrix = matrix.tocsr()
-    
-    print(f"Converted to CSR format")
-    print(f"CSR matrix shape: {matrix.shape}")
-    print(f"CSR non-zeros: {matrix.nnz}")
-    
-    return matrix
-
-def save_csr_to_file(csr_matrix, filename="foo.csr"):
-    """Save CSR matrix data to a file."""
-    try:
-        with open(filename, 'w') as f:
-            # Write indptr (row pointers)
-            f.write("indptr=[")
-            f.write(",".join(map(str, csr_matrix.indptr)))
-            f.write("]\n")
-            
-            # Write indices (column indices)
-            f.write("indices=[")
-            f.write(",".join(map(str, csr_matrix.indices)))
-            f.write("]\n")
-            
-            # Write data (matrix values)
-            f.write("data=[")
-            f.write(",".join(map(str, csr_matrix.data)))
-            f.write("]\n")
-            
-        print(f"CSR matrix saved to {filename}")
-        print(f"Matrix shape: {csr_matrix.shape}")
-        print(f"Non-zeros: {csr_matrix.nnz}")
-        
-    except Exception as e:
-        print(f"Error saving CSR matrix: {e}")
-
 def compile_c_program(c_filename, executable_name="spmv"):
     """Compile the C program using the flags from consts.py."""
     try:
