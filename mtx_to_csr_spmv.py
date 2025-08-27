@@ -164,6 +164,7 @@ int main() {{
     int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
     struct timespec t1, t2;
     double times[100];
+    clock_gettime(CLOCK_MONOTONIC, &t1);
     for (int i=0; i<100; i++) {{
         FILE *file1 = fopen("{csr_filename}", "r");
         if (file1 == NULL) {{
@@ -235,12 +236,10 @@ int main() {{
             x_size++;
         }}
         fclose(file2);
-        clock_gettime(CLOCK_MONOTONIC, &t1);
         spmv_sparse(y, csr_val, indices, indptr, x, {rows});
-        clock_gettime(CLOCK_MONOTONIC, &t2);
-        times[i] = (t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec);
     }}
-    printf("Time: %.2f ms\\n", times[50]);
+    clock_gettime(CLOCK_MONOTONIC, &t2);
+    printf("Time: %.2f ns\\n", ((t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec))/100);
     for (int i=0; i<{rows}; i++) {{
         printf("%.2f\\n", y[i]);
     }}
