@@ -147,10 +147,8 @@ def generate_c_program(csr_filename, vector_filename, rows, cols, nnz, output_fi
 void spmv_sparse(double *restrict y, const double *restrict csr_val, const int *restrict indices, const int *restrict indptr, const double *restrict x, const int rpntr_size) {{
 	double sum = 0;
     for (int i = 0; i < rpntr_size; i++) {{
-		int row_start = indptr[i];
-		int row_end = indptr[i + 1];
         sum = 0;
-		for (int j = row_start; j < row_end; j++) {{
+		for (int j = indptr[i]; j < indptr[i+1]; j++) {{
 			sum += csr_val[j] * x[indices[j]];
 		}}
         y[i] += sum;
@@ -163,87 +161,87 @@ int main() {{
     double *csr_val = (double*)malloc({nnz} * sizeof(double));
     int *indices = (int*)malloc({nnz} * sizeof(int));
     int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
+    FILE *file1 = fopen("{csr_filename}", "r");
+    if (file1 == NULL) {{
+        perror("Error opening file1");
+        exit(EXIT_FAILURE);
+    }}
+    FILE *file2 = fopen("Generated_dense_tensors/{vector_filename}", "r");
+    if (file2 == NULL) {{
+        perror("Error opening file2");
+        exit(EXIT_FAILURE);
+    }}
+    memset(x, 0, sizeof(double)*{cols});
+    memset(csr_val, 0, sizeof(double)*{nnz});
+    memset(indices, 0, sizeof(int)*{nnz});
+    memset(indptr, 0, sizeof(int)*({rows} + 1));
+    char c;
+    int x_size=0, val_size=0;
+    assert(fscanf(file1, "indptr=[%c", &c) == 1);
+    if (c != ']') {{
+        ungetc(c, file1);
+        assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
+        }}
+    }}
+    assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
+    val_size=0;
+    assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
+    val_size++;
+    while (1) {{
+        assert(fscanf(file1, "%c", &c) == 1);
+        if (c == ',') {{
+            assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
+            val_size++;
+        }} else if (c == ']') {{
+            break;
+        }} else {{
+            assert(0);
+        }}
+    }}
+    if(fscanf(file1, "%c", &c));
+    assert(c=='\\n');
+    val_size=0;
+    assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
+    val_size++;
+    while (1) {{
+        assert(fscanf(file1, "%c", &c) == 1);
+        if (c == ',') {{
+            assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
+            val_size++;
+        }} else if (c == ']') {{
+            break;
+        }} else {{
+            assert(0);
+        }}
+    }}
+    fclose(file1);
+    while (x_size < {cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
+        x_size++;
+    }}
+    fclose(file2);
     struct timespec t1, t2;
     double times[100];
     for (int i=0; i<100; i++) {{
-        FILE *file1 = fopen("{csr_filename}", "r");
-        if (file1 == NULL) {{
-            perror("Error opening file1");
-            exit(EXIT_FAILURE);
-        }}
-        FILE *file2 = fopen("Generated_dense_tensors/{vector_filename}", "r");
-        if (file2 == NULL) {{
-            perror("Error opening file2");
-            exit(EXIT_FAILURE);
-        }}
         memset(y, 0, sizeof(double)*{rows});
-        memset(x, 0, sizeof(double)*{cols});
-        memset(csr_val, 0, sizeof(double)*{nnz});
-        memset(indices, 0, sizeof(int)*{nnz});
-        memset(indptr, 0, sizeof(int)*({rows} + 1));
-        char c;
-		int x_size=0, val_size=0;
-		assert(fscanf(file1, "indptr=[%c", &c) == 1);
-        if (c != ']') {{
-            ungetc(c, file1);
-            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
-            val_size++;
-            while (1) {{
-                assert(fscanf(file1, "%c", &c) == 1);
-                if (c == ',') {{
-                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
-                    val_size++;
-                }} else if (c == ']') {{
-                    break;
-                }} else {{
-                    assert(0);
-                }}
-            }}
-        }}
-        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
-		val_size=0;
-        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
-        val_size++;
-        while (1) {{
-            assert(fscanf(file1, "%c", &c) == 1);
-            if (c == ',') {{
-                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
-                val_size++;
-            }} else if (c == ']') {{
-                break;
-            }} else {{
-                assert(0);
-            }}
-        }}
-        if(fscanf(file1, "%c", &c));
-        assert(c=='\\n');
-		val_size=0;
-        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
-        val_size++;
-        while (1) {{
-            assert(fscanf(file1, "%c", &c) == 1);
-            if (c == ',') {{
-                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
-                val_size++;
-            }} else if (c == ']') {{
-                break;
-            }} else {{
-                assert(0);
-            }}
-        }}
-        fclose(file1);
-        while (x_size < {cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
-            x_size++;
-        }}
-        fclose(file2);
         clock_gettime(CLOCK_MONOTONIC, &t1);
         spmv_sparse(y, csr_val, indices, indptr, x, {rows});
         clock_gettime(CLOCK_MONOTONIC, &t2);
         times[i] = (t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec);
     }}
-    for (int i = 0; i < 99; i++) {{
-        for (int j = i + 1; j < 100; j++) {{
-            if (times[i] > times[j]) {{
+    for (int i=0; i<99; i++) {{
+        for (int j=i+1; j<100; j++) {{
+            if (times[j] < times[i]) {{
                 double temp = times[i];
                 times[i] = times[j];
                 times[j] = temp;

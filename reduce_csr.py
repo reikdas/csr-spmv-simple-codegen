@@ -82,7 +82,6 @@ def apply_mask_to_csr(csr_val: List[float], indices: List[int], indptr: List[int
     new_val: List[float] = []
     new_indices: List[int] = []
     new_indptr: List[int] = [0]
-    cursor = 0
     for r in range(n_rows):
         row_start = indptr[r]
         row_end = indptr[r + 1]
@@ -93,7 +92,6 @@ def apply_mask_to_csr(csr_val: List[float], indices: List[int], indptr: List[int
                 new_indices.append(int(indices[i]))
                 kept_in_row += 1
         new_indptr.append(new_indptr[-1] + kept_in_row)
-        cursor = row_end
     assert new_indptr[-1] == len(new_val) == len(new_indices)
     return new_val, new_indices, new_indptr
 
