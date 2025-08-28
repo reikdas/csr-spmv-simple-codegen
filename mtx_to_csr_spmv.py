@@ -3,9 +3,7 @@
 import sys
 import os
 import subprocess
-import numpy as np
 from scipy.io import mmread
-from scipy.sparse import csr_matrix
 import glob
 import csv
 
@@ -147,12 +145,15 @@ def generate_c_program(csr_filename, vector_filename, rows, cols, nnz, output_fi
 #include <assert.h>
 
 void spmv_sparse(double *restrict y, const double *restrict csr_val, const int *restrict indices, const int *restrict indptr, const double *restrict x, const int rpntr_size) {{
-	for (int i = 0; i < rpntr_size; i++) {{
+	double sum = 0;
+    for (int i = 0; i < rpntr_size; i++) {{
 		int row_start = indptr[i];
 		int row_end = indptr[i + 1];
+        sum = 0;
 		for (int j = row_start; j < row_end; j++) {{
-			y[i] += csr_val[j] * x[indices[j]];
+			sum += csr_val[j] * x[indices[j]];
 		}}
+        y[i] += sum;
 	}}
 }}
 
@@ -164,7 +165,6 @@ int main() {{
     int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
     struct timespec t1, t2;
     double times[100];
-    clock_gettime(CLOCK_MONOTONIC, &t1);
     for (int i=0; i<100; i++) {{
         FILE *file1 = fopen("{csr_filename}", "r");
         if (file1 == NULL) {{
@@ -236,10 +236,21 @@ int main() {{
             x_size++;
         }}
         fclose(file2);
+        clock_gettime(CLOCK_MONOTONIC, &t1);
         spmv_sparse(y, csr_val, indices, indptr, x, {rows});
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        times[i] = (t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec);
     }}
-    clock_gettime(CLOCK_MONOTONIC, &t2);
-    printf("Time: %.2f ns\\n", ((t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec))/100);
+    for (int i = 0; i < 99; i++) {{
+        for (int j = i + 1; j < 100; j++) {{
+            if (times[i] > times[j]) {{
+                double temp = times[i];
+                times[i] = times[j];
+                times[j] = temp;
+            }}
+        }}
+    }}
+    printf("Time: %.2f ns\\n", times[50]);
     for (int i=0; i<{rows}; i++) {{
         printf("%.2f\\n", y[i]);
     }}
