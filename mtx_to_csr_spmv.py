@@ -9,7 +9,7 @@ from scipy.sparse import csr_matrix
 import glob
 import csv
 
-CFLAGS = ["-O3", "-march=native", "-funroll-all-loops", "-mprefer-vector-width=512", "-mavx", "-ffast-math"]
+CFLAGS = ["-O3", "-march=native", "-funroll-all-loops", "-mprefer-vector-width=512", "-mavx", "-ffast-math", "-I/home/min/a/das160/papi-install/include"]
 
 # Global variable to store timing results
 timing_results = []
@@ -78,7 +78,7 @@ def read_csr_file(filepath):
 def compile_c_program(c_filename, executable_name="spmv"):
     """Compile the C program using the flags from consts.py."""
     try:
-        compile_cmd = ["gcc"] + CFLAGS + ["-o", executable_name, c_filename]
+        compile_cmd = ["gcc"] + CFLAGS + ["-o", executable_name, c_filename] + ["-L/home/min/a/das160/papi-install/lib", "-lpapi"]
         
         print(f"Compiling C program...")
         print(f"Command: {' '.join(compile_cmd)}")
@@ -145,6 +145,7 @@ def generate_c_program(csr_filename, vector_filename, rows, cols, nnz, output_fi
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <papi.h>
 
 void spmv_sparse(double *restrict y, const double *restrict csr_val, const int *restrict indices, const int *restrict indptr, const double *restrict x, const int rpntr_size) {{
 	for (int i = 0; i < rpntr_size; i++) {{
@@ -157,14 +158,27 @@ void spmv_sparse(double *restrict y, const double *restrict csr_val, const int *
 }}
 
 int main() {{
+    int EventSet = PAPI_NULL;
+    if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT) {{
+        fprintf(stderr, "PAPI library init error!\\n");
+        exit(1);
+    }}
+    if (PAPI_create_eventset(&EventSet) != PAPI_OK) {{
+        fprintf(stderr, "PAPI_create_eventset failed\\n");
+        exit(1);
+    }}
+    int bla = PAPI_add_event(EventSet, PAPI_TOT_CYC);
+    if (bla != PAPI_OK) {{
+        fprintf(stderr, "PAPI_add_event failed with code %d\\n", bla);
+        exit(1);
+    }}
     double *y = (double*)malloc({rows} * sizeof(double));
     double *x = (double*)malloc({cols} * sizeof(double));
     double *csr_val = (double*)malloc({nnz} * sizeof(double));
     int *indices = (int*)malloc({nnz} * sizeof(int));
     int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
     struct timespec t1, t2;
-    double times[100];
-    clock_gettime(CLOCK_MONOTONIC, &t1);
+    long long times[100];
     for (int i=0; i<100; i++) {{
         FILE *file1 = fopen("{csr_filename}", "r");
         if (file1 == NULL) {{
@@ -236,10 +250,26 @@ int main() {{
             x_size++;
         }}
         fclose(file2);
+        if (PAPI_start(EventSet) != PAPI_OK) {{
+            fprintf(stderr, "PAPI_start failed\\n");
+            exit(1);
+        }}
         spmv_sparse(y, csr_val, indices, indptr, x, {rows});
+        if (PAPI_stop(EventSet, &times[i]) != PAPI_OK) {{
+            fprintf(stderr, "PAPI_stop failed\\n");
+            exit(1);
+        }}
     }}
-    clock_gettime(CLOCK_MONOTONIC, &t2);
-    printf("Time: %.2f ns\\n", ((t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec))/100);
+    for (int i = 0; i < 99; i++) {{
+        for (int j = i + 1; j < 100; j++) {{
+            if (times[i] > times[j]) {{
+                long long temp = times[i];
+                times[i] = times[j];
+                times[j] = temp;
+            }}
+        }}
+    }}
+    printf("Time: %.2lld ns\\n", times[50]);
     for (int i=0; i<{rows}; i++) {{
         printf("%.2f\\n", y[i]);
     }}
