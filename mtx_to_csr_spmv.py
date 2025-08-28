@@ -151,7 +151,7 @@ void spmv_sparse(double *restrict y, const double *restrict csr_val, const int *
 		for (int j = indptr[i]; j < indptr[i+1]; j++) {{
 			sum += csr_val[j] * x[indices[j]];
 		}}
-        y[i] += sum;
+        y[i] = sum;
 	}}
 }}
 
