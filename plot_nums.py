@@ -17,5 +17,4 @@ def plot_matrix_timing(matrix, op):
 
 
 if __name__ == "__main__":
-    plot_matrix_timing("brainpc2", "spmm")
-        
+    plot_matrix_timing("brainpc2", "spmv")

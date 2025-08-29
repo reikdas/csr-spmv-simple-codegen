@@ -1,7 +1,6 @@
 import scipy
-import random
 from typing import List, Tuple, TypeVar, Callable
-
+import os
 
 T = TypeVar("T", int, float)
 
@@ -49,46 +48,44 @@ def find_line_index(lines: List[str], key: str) -> int:
     raise ValueError(f"Key {key} not found in file")
 
 
-def sampled_removal_mask(indptr: List[int], drop_fraction: float, seed: int | None) -> List[bool]:
-    """Return a mask for entries in the CSR data (length == indptr[-1]) marking which
-    entries to keep (True) or drop (False). We drop approximately drop_fraction of entries.
-
-    We sample uniformly at random over all nonzero positions, but maintain row structure:
-    each row keeps a subset of its entries, and rows are allowed to become empty.
-    """
-    if not indptr:
-        return []
-    nnz = indptr[-1]
-    num_drop = int(nnz * drop_fraction)
-    num_drop = max(0, min(num_drop, nnz))
-    rng = random.Random(seed)
-    to_drop = set(rng.sample(range(nnz), num_drop)) if num_drop > 0 else set()
-    mask = [i not in to_drop for i in range(nnz)]
-    return mask
-
-
-def apply_mask_to_csr(csr_val: List[float], indices: List[int], indptr: List[int], mask: List[bool]) -> Tuple[List[float], List[int], List[int]]:
-    assert len(csr_val) == len(indices) == len(mask)
-    n_rows = len(indptr) - 1
-    new_val: List[float] = []
-    new_indices: List[int] = []
-    new_indptr: List[int] = [0]
-    for r in range(n_rows):
+def truncate_csr(csr_val: List[float], indices: List[int], indptr: List[int], keep_fraction: float) -> Tuple[List[float], List[int], List[int]]:
+    """Truncate CSR data to keep only the first keep_fraction of elements."""
+    nnz = len(csr_val)
+    keep_count = int(nnz * keep_fraction)
+    keep_count = max(0, min(keep_count, nnz))
+    
+    # Keep only the first keep_count elements
+    new_val = csr_val[:keep_count]
+    new_indices = indices[:keep_count]
+    
+    # Recalculate indptr based on the new data
+    new_indptr = [0]
+    current_pos = 0
+    for r in range(len(indptr) - 1):
         row_start = indptr[r]
         row_end = indptr[r + 1]
-        kept_in_row = 0
-        for i in range(row_start, row_end):
-            if mask[i]:
-                new_val.append(float(csr_val[i]))
-                new_indices.append(int(indices[i]))
-                kept_in_row += 1
+        row_size = row_end - row_start
+        
+        # Count how many elements from this row we're keeping
+        kept_in_row = min(row_size, max(0, keep_count - current_pos))
         new_indptr.append(new_indptr[-1] + kept_in_row)
-    assert new_indptr[-1] == len(new_val) == len(new_indices)
+        current_pos += kept_in_row
+        
+        if current_pos >= keep_count:
+            break
+    
+    # Ensure we have the right number of rows
+    while len(new_indptr) < len(indptr):
+        new_indptr.append(new_indptr[-1])
+    
     return new_val, new_indices, new_indptr
+
 
 def save_csr_to_file(matrix_name):
     csr_matrix = scipy.io.mmread(f"matrices/{matrix_name}.mtx")
     csr_matrix = csr_matrix.tocsr()
+    if not os.path.exists("csr_files"):
+        os.makedirs("csr_files")
     try:
         with open(f"csr_files/{matrix_name}.csr", 'w') as f:
             # Write indptr (row pointers)
@@ -109,6 +106,7 @@ def save_csr_to_file(matrix_name):
     except Exception as e:
         print(f"Error saving CSR matrix: {e}")
 
+
 if __name__ == "__main__":
     matrices = ["brainpc2", "heart1", "lowThrust_7"]
     for matrix in matrices:
@@ -122,10 +120,10 @@ if __name__ == "__main__":
         csr_val = parse_array(lines[idx_val], "data", float)
         for pct in [10, 20, 30, 40, 50, 60, 70, 80, 90]:
             fraction = pct / 100.0
+            keep_fraction = 1.0 - fraction  # Keep (100-pct)% of elements
             
-            # Build mask and apply
-            mask = sampled_removal_mask(indptr, fraction, 42) # Hardcoded seed for reproducibility
-            new_val, new_indices, new_indptr = apply_mask_to_csr(csr_val, indices, indptr, mask)
+            # Apply truncation directly
+            new_val, new_indices, new_indptr = truncate_csr(csr_val, indices, indptr, keep_fraction)
 
             # Create output filename
             output_filename = f"csr_files/{matrix}_reduced_{pct}pct.csr"

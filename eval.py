@@ -499,5 +499,5 @@ if __name__ == "__main__":
     # matrices = ["brainpc2", "heart1", "lowThrust_7"]
     matrices = ["brainpc2"]
     for matrix in matrices:
-        # run_spmv(matrix)
-        run_spmm(matrix)
+        run_spmv(matrix)
+        # run_spmm(matrix)
