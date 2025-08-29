@@ -2,3 +2,6 @@ Generated_dense_tensors/
 *.csr
 *.c
 spmv
+spmm
+.vscode/
+*.pdf
