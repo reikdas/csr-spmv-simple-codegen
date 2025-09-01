@@ -5,7 +5,7 @@ import glob
 import csv
 from pathlib import Path
 
-CFLAGS = ["-O3", "-march=native", "-funroll-all-loops", "-mprefer-vector-width=512", "-mavx", "-ffast-math"]
+CFLAGS = ["-O3", "-march=native", "-funroll-all-loops", "-mprefer-vector-width=512", "-mavx", "-ffast-math", "-I/home/min/a/das160/papi-install/include"]
 
 # Global variable to store timing results
 timing_results = []
@@ -413,11 +413,7 @@ int main() {{
             }}
         }}
     }}
-<<<<<<< HEAD
-    printf("Time: %.2f ns\\n", times[{bench_freq // 2}]);
-=======
     printf("Time: %.2lld ns\\n", times[{bench_freq//2}]);
->>>>>>> 6c10bf9 (Timing using PAPI)
     for (int i=0; i<{rows}; i++) {{
         printf("%.2f\\n", y[i]);
     }}
