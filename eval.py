@@ -1,9 +1,6 @@
-#!/usr/bin/env python3
-
 import sys
 import os
 import subprocess
-from scipy.io import mmread
 import glob
 import csv
 
@@ -394,73 +391,82 @@ int main() {{
         print(f"Error generating C program: {e}")
         sys.exit(1)
 
-def csr_spmm(csr_filepath):
-    """Process a single CSR file and run SpMM evaluation."""
-    print(f"\n{'='*80}")
-    print(f"Processing: {csr_filepath}")
-    print(f"{'='*80}")
-
-    rows, cols, nnz = read_csr_file(csr_filepath)
-
-    write_dense_matrix(1.0, cols, 512)
-
-    c_filename = generate_spmm(
-        csr_filepath,
-        f"generated_matrix_{cols}x{512}.matrix",
-        rows,
-        cols, 512,
-        nnz=nnz,
-        output_filename="spmm.c"
-    )
-
-    if compile_c_program(c_filename, "spmm"):
-        return execute_program("spmm")
-    else:
-        print(f"Skipping execution for {csr_filepath}_spmm due to compilation failure.")
-        return False
-
-def csr_spmv(csr_filepath):
-    """Process a single CSR file and run SpMV evaluation."""
-    print(f"\n{'='*80}")
-    print(f"Processing: {csr_filepath}")
-    print(f"{'='*80}")
+def csr_operation(csr_filepath, operation_type):
+    """
+    Generic function to process a CSR file and run SpMM or SpMV evaluation.
     
+    Args:
+        csr_filepath: Path to the CSR file
+        operation_type: Either 'spmm' or 'spmv'
+    """
+    print(f"\n{'='*80}")
+    print(f"Processing: {csr_filepath}")
+    print(f"{'='*80}")
+
     # Read CSR file to get dimensions
     rows, cols, nnz = read_csr_file(csr_filepath)
     
-    # Generate vector for this matrix size
-    write_dense_vector(1.0, cols)
+    if operation_type == 'spmm':
+        # Generate dense matrix for SpMM
+        write_dense_matrix(1.0, cols, 512)
+        tensor_filename = f"generated_matrix_{cols}x{512}.matrix"
+        
+        # Generate C program for SpMM
+        c_filename = generate_spmm(
+            csr_filepath,
+            tensor_filename,
+            rows,
+            cols, 512,
+            nnz=nnz,
+            output_filename="spmm.c"
+        )
+        executable_name = "spmm"
+    else:  # spmv
+        # Generate dense vector for SpMV
+        write_dense_vector(1.0, cols)
+        tensor_filename = f"generated_vector_{cols}.vector"
+        
+        # Generate C program for SpMV
+        c_filename = generate_spmv(
+            csr_filepath,
+            tensor_filename,
+            rows=rows,
+            cols=cols,
+            nnz=nnz,
+            output_filename="spmv.c"
+        )
+        executable_name = "spmv"
     
-    # Generate C program
-    c_filename = generate_spmv(
-        csr_filepath,
-        f"generated_vector_{cols}.vector",
-        rows=rows,
-        cols=cols,
-        nnz=nnz,
-        output_filename="spmv.c"
-    )
-    
-    if c_filename and compile_c_program(c_filename, "spmv"):
-        return execute_program("spmv")    
+    # Compile and execute
+    if c_filename and compile_c_program(c_filename, executable_name):
+        return execute_program(executable_name)
     else:
-        print(f"Skipping execution for {csr_filepath}_spmv due to compilation failure.")
+        print(f"Skipping execution for {csr_filepath}_{operation_type} due to compilation failure.")
         return False
-
-
-def run_spmm(matrix):
+    
+def run_sparse_operation(matrix, operation_type, reduction_type):
+    """
+    Generic function to run sparse operations (SpMM or SpMV) with different reduction types.
+    
+    Args:
+        matrix: Matrix name
+        operation_type: Either 'spmm' or 'spmv'
+        reduction_type: Either 'consec', 'truncated', or 'random'
+    """
     timing_results = {}
     
-    timing_results[100] = csr_spmm(f"csr_files/{matrix}.csr")
+    # Process original matrix (100%)
+    timing_results[100] = csr_operation(f"csr_files/{matrix}.csr", operation_type)
     
     # Process reduced CSR files
-    csr_files = glob.glob(f"csr_files/{matrix}_reduced_*pct.csr")
+    csr_files = glob.glob(f"csr_files/{matrix}_{reduction_type}_*pct.csr")
     for csr_file in csr_files:
-        reduction_pct = csr_file.split("reduced_")[1].split("pct.csr")[0]
+        reduction_pct = csr_file.split(f"{reduction_type}_")[1].split("pct.csr")[0]
         percentage = 100 - int(reduction_pct)
-        timing_results[percentage] = csr_spmm(csr_file)
+        timing_results[percentage] = csr_operation(csr_file, operation_type)
 
-    with open(f"timing_{matrix}_spmm.csv", "w", newline='') as csvfile:
+    # Write results to CSV
+    with open(f"timing_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['Percentage', 'Time_ns'])
         
@@ -470,34 +476,13 @@ def run_spmm(matrix):
         for percentage, time in sorted_results:
             if time is not False:
                 writer.writerow([percentage, f"{time:.6f}"])
-
-def run_spmv(matrix):
-    timing_results = {}
-    
-    timing_results[100] = csr_spmv(f"csr_files/{matrix}.csr")
-    
-    # Process reduced CSR files
-    csr_files = glob.glob(f"csr_files/{matrix}_reduced_*pct.csr")
-    for csr_file in csr_files:
-        reduction_pct = csr_file.split("reduced_")[1].split("pct.csr")[0]
-        percentage = 100 - int(reduction_pct)
-        timing_results[percentage] = csr_spmv(csr_file)
-
-    with open(f"timing_{matrix}_spmv.csv", "w", newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(['Percentage', 'Time_ns'])
-        
-        # Sort results by percentage (descending)
-        sorted_results = sorted(timing_results.items(), key=lambda x: x[0], reverse=True)
-        
-        for percentage, time in sorted_results:
-            if time is not False:
-                writer.writerow([percentage, f"{time:.6f}"])
-
 
 if __name__ == "__main__":
     # matrices = ["brainpc2", "heart1", "lowThrust_7"]
     matrices = ["brainpc2"]
+    ops = ["spmv", "spmm"]
+    reduction_types = ["random", "truncated", "consec"]
     for matrix in matrices:
-        # run_spmv(matrix)
-        run_spmm(matrix)
+        for op in ops:
+            for reduction_type in reduction_types:
+                run_sparse_operation(matrix, op, reduction_type)

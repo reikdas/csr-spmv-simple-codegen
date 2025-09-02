@@ -5,3 +5,4 @@ spmv
 spmm
 .vscode/
 *.pdf
+*.pyc

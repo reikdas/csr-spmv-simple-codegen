@@ -1,6 +1,7 @@
 import scipy
 import random
 from typing import List, Tuple, TypeVar, Callable
+import os
 
 
 T = TypeVar("T", int, float)
@@ -86,7 +87,78 @@ def apply_mask_to_csr(csr_val: List[float], indices: List[int], indptr: List[int
     assert new_indptr[-1] == len(new_val) == len(new_indices)
     return new_val, new_indices, new_indptr
 
+def truncate_csr(csr_val: List[float], indices: List[int], indptr: List[int], keep_fraction: float) -> Tuple[List[float], List[int], List[int]]:
+    """Truncate CSR data to keep only the first keep_fraction of elements."""
+    nnz = len(csr_val)
+    keep_count = int(nnz * keep_fraction)
+    keep_count = max(0, min(keep_count, nnz))
+    
+    # Keep only the first keep_count elements
+    new_val = csr_val[:keep_count]
+    new_indices = indices[:keep_count]
+    
+    # Recalculate indptr based on the new data
+    new_indptr = [0]
+    current_pos = 0
+    for r in range(len(indptr) - 1):
+        row_start = indptr[r]
+        row_end = indptr[r + 1]
+        row_size = row_end - row_start
+        
+        # Count how many elements from this row we're keeping
+        kept_in_row = min(row_size, max(0, keep_count - current_pos))
+        new_indptr.append(new_indptr[-1] + kept_in_row)
+        current_pos += kept_in_row
+        
+        if current_pos >= keep_count:
+            break
+    
+    # Ensure we have the right number of rows
+    while len(new_indptr) < len(indptr):
+        new_indptr.append(new_indptr[-1])
+    
+    return new_val, new_indices, new_indptr
+
+def truncate_consec_csr(csr_val: List[float], indices: List[int], indptr: List[int], keep_fraction: float) -> Tuple[List[float], List[int], List[int]]:
+    """Truncate CSR data to keep only the first keep_fraction of elements."""
+    nnz = len(csr_val)
+    remove_count = int(nnz * (1 - keep_fraction))
+    if remove_count == 0:
+        return csr_val, indices, indptr
+    # Choose a random consecutive block from the middle
+    max_start = nnz - remove_count
+    if max_start <= 0:
+        start = 0
+    else:
+        # Avoid removing from the very start or end
+        min_start = max(1, nnz // 4)
+        max_start = min(max_start, nnz - remove_count - 1)
+        if max_start <= min_start:
+            start = min_start
+        else:
+            start = random.randint(min_start, max_start)
+    end = start + remove_count
+    # Remove the block
+    new_val = csr_val[:start] + csr_val[end:]
+    new_indices = indices[:start] + indices[end:]
+    # Recalculate indptr
+    new_indptr = [0]
+    curr = 0
+    for r in range(len(indptr) - 1):
+        row_start = indptr[r]
+        row_end = indptr[r + 1]
+        row_nnz = row_end - row_start
+        # Count how many nnz in this row are kept
+        kept = 0
+        for i in range(row_start, row_end):
+            if i < start or i >= end:
+                kept += 1
+        new_indptr.append(new_indptr[-1] + kept)
+    return new_val, new_indices, new_indptr
+
 def save_csr_to_file(matrix_name):
+    if not os.path.exists("csr_files"):
+        os.mkdir("csr_files")
     csr_matrix = scipy.io.mmread(f"matrices/{matrix_name}.mtx")
     csr_matrix = csr_matrix.tocsr()
     try:
@@ -128,7 +200,7 @@ if __name__ == "__main__":
             new_val, new_indices, new_indptr = apply_mask_to_csr(csr_val, indices, indptr, mask)
 
             # Create output filename
-            output_filename = f"csr_files/{matrix}_reduced_{pct}pct.csr"
+            output_filename = f"csr_files/{matrix}_random_{pct}pct.csr"
 
             # Create a copy of lines for this variant
             variant_lines = lines.copy()
@@ -137,8 +209,22 @@ if __name__ == "__main__":
             variant_lines[idx_val] = format_array("data", new_val)
             variant_lines[idx_indices] = format_array("indices", new_indices)
             variant_lines[idx_indptr] = format_array("indptr", new_indptr)
-
             write_csr_lines(output_filename, variant_lines)
-            
-            reduction = len(csr_val) - len(new_val)
-            reduction_pct = (reduction / len(csr_val)) * 100
+
+            keep_fraction = 1.0 - fraction
+
+            new_val, new_indices, new_indptr = truncate_csr(csr_val, indices, indptr, keep_fraction)
+            output_filename = f"csr_files/{matrix}_truncated_{pct}pct.csr"
+            variant_lines = lines.copy()
+            variant_lines[idx_val] = format_array("data", new_val)
+            variant_lines[idx_indices] = format_array("indices", new_indices)
+            variant_lines[idx_indptr] = format_array("indptr", new_indptr)
+            write_csr_lines(output_filename, variant_lines)
+
+            new_val, new_indices, new_indptr = truncate_consec_csr(csr_val, indices, indptr, keep_fraction)
+            output_filename = f"csr_files/{matrix}_consec_{pct}pct.csr"
+            variant_lines = lines.copy()
+            variant_lines[idx_val] = format_array("data", new_val)
+            variant_lines[idx_indices] = format_array("indices", new_indices)
+            variant_lines[idx_indptr] = format_array("indptr", new_indptr)
+            write_csr_lines(output_filename, variant_lines)
