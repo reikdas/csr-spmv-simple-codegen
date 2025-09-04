@@ -4,5 +4,6 @@ Generated_dense_tensors/
 spmv
 spmm
 .vscode/
-*.pdf
 *.pyc
+matrices/
+*.out

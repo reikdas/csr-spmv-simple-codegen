@@ -2,6 +2,7 @@ import scipy
 import random
 from typing import List, Tuple, TypeVar, Callable
 import os
+from pathlib import Path
 
 
 T = TypeVar("T", int, float)
@@ -182,7 +183,7 @@ def save_csr_to_file(matrix_name):
         print(f"Error saving CSR matrix: {e}")
 
 if __name__ == "__main__":
-    matrices = ["brainpc2", "heart1", "lowThrust_7"]
+    matrices = [p.stem for p in Path("matrices").glob("*.mtx")]
     for matrix in matrices:
         save_csr_to_file(matrix)
         lines = load_csr_lines(f"csr_files/{matrix}.csr")

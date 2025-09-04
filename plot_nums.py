@@ -1,8 +1,9 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 def plot_matrix_timing(matrix, op, reduction_type):
-    df = pd.read_csv(f"timing_{matrix}_{op}_{reduction_type}.csv")
+    df = pd.read_csv(f"results/timing_{matrix}_{op}_{reduction_type}.csv")
     plt.figure(figsize=(8,6))
     plt.plot(df["Percentage"], df["Time_ns"], marker="o", linestyle="-")
 
@@ -13,11 +14,11 @@ def plot_matrix_timing(matrix, op, reduction_type):
     plt.grid(True)
 
     # Show the plot
-    plt.savefig(f"{matrix}_{op}_{reduction_type}.pdf")
+    plt.savefig(f"plots/{matrix}_{op}_{reduction_type}.pdf")
 
 
 if __name__ == "__main__":
-    matrices = ["brainpc2"]
+    matrices = [p.stem for p in Path("matrices").glob("*.mtx")]
     ops = ["spmm", "spmv"]
     reduction_types = ["random", "truncated", "consec"]
     for matrix in matrices:

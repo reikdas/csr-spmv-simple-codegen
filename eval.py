@@ -3,6 +3,7 @@ import os
 import subprocess
 import glob
 import csv
+from pathlib import Path
 
 CFLAGS = ["-O3", "-march=native", "-funroll-all-loops", "-mprefer-vector-width=512", "-mavx", "-ffast-math"]
 
@@ -466,7 +467,7 @@ def run_sparse_operation(matrix, operation_type, reduction_type):
         timing_results[percentage] = csr_operation(csr_file, operation_type)
 
     # Write results to CSV
-    with open(f"timing_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
+    with open(f"results/timing_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow(['Percentage', 'Time_ns'])
         
@@ -478,8 +479,7 @@ def run_sparse_operation(matrix, operation_type, reduction_type):
                 writer.writerow([percentage, f"{time:.6f}"])
 
 if __name__ == "__main__":
-    # matrices = ["brainpc2", "heart1", "lowThrust_7"]
-    matrices = ["brainpc2"]
+    matrices = [p.stem for p in Path("matrices").glob("*.mtx")]
     ops = ["spmv", "spmm"]
     reduction_types = ["random", "truncated", "consec"]
     for matrix in matrices:
