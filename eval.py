@@ -128,7 +128,7 @@ def extract_timing(output_text):
     except (ValueError, IndexError):
         return None
     
-def generate_spmm(csr_filename, matrix_filename, sparse_rows, sparse_cols, dense_cols, nnz, output_filename):
+def generate_spmm(csr_filename, matrix_filename, sparse_rows, sparse_cols, dense_cols, nnz, output_filename, bench_freq):
     c_code = f"""
 #include <stdio.h>
 #include <time.h>
@@ -224,16 +224,16 @@ int main() {{
     }}
     fclose(file2);
     struct timespec t1, t2;
-    double times[100];
-    for (int i = 0; i < 100; i++) {{
+    double times[{bench_freq}];
+    for (int i = 0; i < {bench_freq}; i++) {{
         memset(y, 0, sizeof(double)*{sparse_rows*dense_cols});
         clock_gettime(CLOCK_MONOTONIC, &t1);
         spmm_sparse(y, csr_val, indices, indptr, x, {sparse_rows}, {dense_cols});
         clock_gettime(CLOCK_MONOTONIC, &t2);
         times[i] = (t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec);
     }}
-    for (int i=0; i<99; i++) {{
-        for (int j=i+1; j<100; j++) {{
+    for (int i=0; i<{bench_freq-1}; i++) {{
+        for (int j=i+1; j<{bench_freq}; j++) {{
             if (times[j] < times[i]) {{
                 double temp = times[i];
                 times[i] = times[j];
@@ -241,7 +241,7 @@ int main() {{
             }}
         }}
     }}
-    printf("Time: %.2f ns\\n", times[50]);
+    printf("Time: %.2f ns\\n", times[{bench_freq // 2}]);
     for (int i=0; i<{sparse_rows * dense_cols}; i++) {{
         printf("%.2f\\n", y[i]);
     }}
@@ -261,7 +261,7 @@ int main() {{
         sys.exit(1)
 
 
-def generate_spmv(csr_filename, vector_filename, rows, cols, nnz, output_filename):
+def generate_spmv(csr_filename, vector_filename, rows, cols, nnz, output_filename, bench_freq):
     c_code = f"""
 #include <stdio.h>
 #include <time.h>
@@ -356,16 +356,16 @@ int main() {{
     }}
     fclose(file2);
     struct timespec t1, t2;
-    double times[100];
-    for (int i=0; i<100; i++) {{
+    double times[{bench_freq}];
+    for (int i=0; i<{bench_freq}; i++) {{
         memset(y, 0, sizeof(double)*{rows});
         clock_gettime(CLOCK_MONOTONIC, &t1);
         spmv_sparse(y, csr_val, indices, indptr, x, {rows});
         clock_gettime(CLOCK_MONOTONIC, &t2);
         times[i] = (t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec);
     }}
-    for (int i=0; i<99; i++) {{
-        for (int j=i+1; j<100; j++) {{
+    for (int i=0; i<{bench_freq - 1}; i++) {{
+        for (int j=i+1; j<{bench_freq}; j++) {{
             if (times[j] < times[i]) {{
                 double temp = times[i];
                 times[i] = times[j];
@@ -373,7 +373,7 @@ int main() {{
             }}
         }}
     }}
-    printf("Time: %.2f ns\\n", times[50]);
+    printf("Time: %.2f ns\\n", times[{bench_freq // 2}]);
     for (int i=0; i<{rows}; i++) {{
         printf("%.2f\\n", y[i]);
     }}
@@ -392,7 +392,7 @@ int main() {{
         print(f"Error generating C program: {e}")
         sys.exit(1)
 
-def csr_operation(csr_filepath, operation_type):
+def csr_operation(csr_filepath, operation_type, bench_freq):
     """
     Generic function to process a CSR file and run SpMM or SpMV evaluation.
     
@@ -419,7 +419,8 @@ def csr_operation(csr_filepath, operation_type):
             rows,
             cols, 512,
             nnz=nnz,
-            output_filename="spmm.c"
+            output_filename="spmm.c",
+            bench_freq=bench_freq
         )
         executable_name = "spmm"
     else:  # spmv
@@ -434,7 +435,8 @@ def csr_operation(csr_filepath, operation_type):
             rows=rows,
             cols=cols,
             nnz=nnz,
-            output_filename="spmv.c"
+            output_filename="spmv.c",
+            bench_freq=bench_freq
         )
         executable_name = "spmv"
     
@@ -444,8 +446,8 @@ def csr_operation(csr_filepath, operation_type):
     else:
         print(f"Skipping execution for {csr_filepath}_{operation_type} due to compilation failure.")
         return False
-    
-def run_sparse_operation(matrix, operation_type, reduction_type):
+
+def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq):
     """
     Generic function to run sparse operations (SpMM or SpMV) with different reduction types.
     
@@ -457,14 +459,14 @@ def run_sparse_operation(matrix, operation_type, reduction_type):
     timing_results = {}
     
     # Process original matrix (100%)
-    timing_results[100] = csr_operation(f"csr_files/{matrix}.csr", operation_type)
+    timing_results[100] = csr_operation(f"csr_files/{matrix}.csr", operation_type, bench_freq)
     
     # Process reduced CSR files
     csr_files = glob.glob(f"csr_files/{matrix}_{reduction_type}_*pct.csr")
     for csr_file in csr_files:
         reduction_pct = csr_file.split(f"{reduction_type}_")[1].split("pct.csr")[0]
         percentage = 100 - int(reduction_pct)
-        timing_results[percentage] = csr_operation(csr_file, operation_type)
+        timing_results[percentage] = csr_operation(csr_file, operation_type, bench_freq)
 
     # Write results to CSV
     with open(f"results/timing_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
@@ -485,4 +487,4 @@ if __name__ == "__main__":
     for matrix in matrices:
         for op in ops:
             for reduction_type in reduction_types:
-                run_sparse_operation(matrix, op, reduction_type)
+                run_sparse_operation(matrix, op, reduction_type, 100)
