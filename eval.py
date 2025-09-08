@@ -97,11 +97,11 @@ def execute_program(executable_name="spmv"):
         
         # Extract timing information from output
         timing_info = extract_timing(result.stdout)
-        if timing_info:
+        if timing_info is not None:
             print("\n" + "=" * 60)
-            print("TIMING RESULTS")
+            print("Branch Mispred RESULTS")
             print("=" * 60)
-            print(f"Time: {timing_info:.6f} ns")
+            print(f"Branch mispredictions: {timing_info:.6f}")
             print("=" * 60)
             return timing_info
         return None
@@ -311,7 +311,7 @@ int main() {{
         fprintf(stderr, "PAPI_create_eventset failed\\n");
         exit(1);
     }}
-    int bla = PAPI_add_event(EventSet, PAPI_TOT_CYC);
+    int bla = PAPI_add_event(EventSet, PAPI_BR_MSP);
     if (bla != PAPI_OK) {{
         fprintf(stderr, "PAPI_add_event failed with code %d\\n", bla);
         exit(1);
@@ -509,20 +509,23 @@ def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq):
         timing_results[percentage] = csr_operation(csr_file, operation_type, bench_freq)
 
     # Write results to CSV
-    with open(f"results/timing_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
+    with open(f"results/papi_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Percentage', 'Time_ns'])
+        writer.writerow(['Percentage', 'branch_mispreds'])
         
         # Sort results by percentage (descending)
         sorted_results = sorted(timing_results.items(), key=lambda x: x[0], reverse=True)
+        # print(sorted_results)
         
         for percentage, time in sorted_results:
             if time is not False:
+                # print(percentage, time)
                 writer.writerow([percentage, f"{time:.6f}"])
 
 if __name__ == "__main__":
     matrices = [p.stem for p in Path("matrices").glob("*.mtx")]
-    ops = ["spmv", "spmm"]
+    # ops = ["spmv", "spmm"]
+    ops = ["spmv"]
     reduction_types = ["random", "truncated", "consec"]
     for matrix in matrices:
         for op in ops:
