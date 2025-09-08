@@ -311,10 +311,15 @@ int main() {{
         fprintf(stderr, "PAPI_create_eventset failed\\n");
         exit(1);
     }}
-    int bla = PAPI_add_event(EventSet, PAPI_BR_MSP);
-    if (bla != PAPI_OK) {{
-        fprintf(stderr, "PAPI_add_event failed with code %d\\n", bla);
-        exit(1);
+    int events[] = {{
+        PAPI_BR_MSP, PAPI_BR_CN
+    }};
+    int num_events = sizeof(events) / sizeof(events[0]);
+    for (int i = 0; i < num_events; i++) {{
+        if (PAPI_add_event(EventSet, events[i]) != PAPI_OK) {{
+            fprintf(stderr, "PAPI_add_event failed for event %d\\n", events[i]);
+            exit(1);
+        }}
     }}
     double *y = (double*)malloc({rows} * sizeof(double));
     double *x = (double*)malloc({cols} * sizeof(double));
@@ -391,7 +396,8 @@ int main() {{
     }}
     fclose(file2);
     struct timespec t1, t2;
-    long long times[{bench_freq}];
+    long long event_times[{bench_freq}][num_events];
+    float times[{bench_freq}];
     for (int i=0; i<{bench_freq}; i++) {{
         memset(y, 0, sizeof(double)*{rows});
         if (PAPI_start(EventSet) != PAPI_OK) {{
@@ -399,21 +405,22 @@ int main() {{
             exit(1);
         }}
         spmv_sparse(y, csr_val, indices, indptr, x, {rows});
-        if (PAPI_stop(EventSet, &times[i]) != PAPI_OK) {{
+        if (PAPI_stop(EventSet, event_times[i]) != PAPI_OK) {{
             fprintf(stderr, "PAPI_stop failed\\n");
             exit(1);
         }}
+        times[i] = ((float)event_times[i][0]/event_times[i][1])*100;
     }}
     for (int i=0; i<{bench_freq - 1}; i++) {{
         for (int j=i+1; j<{bench_freq}; j++) {{
             if (times[j] < times[i]) {{
-                long long temp = times[i];
+                float temp = times[i];
                 times[i] = times[j];
                 times[j] = temp;
             }}
         }}
     }}
-    printf("Time: %.2lld ns\\n", times[{bench_freq//2}]);
+    printf("Time: %.2lf ns\\n", times[{bench_freq//2}]);
     for (int i=0; i<{rows}; i++) {{
         printf("%.2f\\n", y[i]);
     }}
