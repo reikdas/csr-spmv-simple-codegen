@@ -5,11 +5,11 @@ from pathlib import Path
 def plot_matrix_timing(matrix, op, reduction_type):
     df = pd.read_csv(f"results/papi_{matrix}_{op}_{reduction_type}.csv")
     plt.figure(figsize=(8,6))
-    plt.plot(df["Percentage"], df["branch_mispreds"], marker="o", linestyle="-")
+    plt.plot(df["Percentage"], df["l2_cache_miss_rate"], marker="o", linestyle="-")
 
-    plt.title(f"Matrix Density vs Branch Mispredictions ({matrix} - {reduction_type})")
+    plt.title(f"Matrix Density vs L2 cache miss rate ({matrix} - {reduction_type})")
     plt.xlabel("Density (%)")
-    plt.ylabel("Branch Mispredictions")
+    plt.ylabel("L2 Cache Miss Rate")
     plt.gca().invert_xaxis()  # so 100% appears on the left
     plt.grid(True)
 

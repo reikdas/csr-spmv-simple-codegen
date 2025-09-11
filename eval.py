@@ -99,9 +99,9 @@ def execute_program(executable_name="spmv"):
         timing_info = extract_timing(result.stdout)
         if timing_info is not None:
             print("\n" + "=" * 60)
-            print("Branch Mispred RESULTS")
+            print("L2 Cache Miss RESULTS")
             print("=" * 60)
-            print(f"Branch mispredictions: {timing_info:.6f}")
+            print(f"L2 cache miss rate: {timing_info:.6f}")
             print("=" * 60)
             return timing_info
         return None
@@ -312,7 +312,7 @@ int main() {{
         exit(1);
     }}
     int events[] = {{
-        PAPI_BR_MSP, PAPI_BR_CN
+        PAPI_L2_TCM, PAPI_L2_TCA
     }};
     int num_events = sizeof(events) / sizeof(events[0]);
     for (int i = 0; i < num_events; i++) {{
@@ -518,7 +518,7 @@ def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq):
     # Write results to CSV
     with open(f"results/papi_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Percentage', 'branch_mispreds'])
+        writer.writerow(['Percentage', 'l2_cache_miss_rate'])
         
         # Sort results by percentage (descending)
         sorted_results = sorted(timing_results.items(), key=lambda x: x[0], reverse=True)
