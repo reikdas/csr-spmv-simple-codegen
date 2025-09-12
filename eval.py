@@ -154,31 +154,50 @@ int main() {{
     double *csr_val = (double*)malloc({nnz}*sizeof(double));
     int *indices = (int*)malloc({nnz}*sizeof(int));
     int *indptr = (int*)malloc(({sparse_rows + 1}) * sizeof(int));
-    FILE *file1 = fopen("{csr_filename}", "r");
-    if (file1 == NULL) {{
-        perror("Error opening file1\\n");
-        exit(EXIT_FAILURE);
-    }}
-    FILE *file2 = fopen("Generated_dense_tensors/{matrix_filename}", "r");
-    if (file2 == NULL) {{
-        perror("Error opening file2\\n");
-        exit(EXIT_FAILURE);
-    }}
-    memset(x, 0, sizeof(double)*{sparse_cols*dense_cols});
-    memset(csr_val, 0, sizeof(double)*{nnz});
-    memset(indices, 0, sizeof(int)*{nnz});
-    memset(indptr, 0, sizeof(int)*({sparse_rows} + 1));
-    char c;
-    int x_size=0, val_size=0;
-    assert(fscanf(file1, "indptr=[%c", &c) == 1);
-    if (c != ']') {{
-        ungetc(c, file1);
-        assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+    struct timespec t1, t2;
+    double times[{bench_freq}];
+    for (int i = 0; i < {bench_freq}; i++) {{
+        FILE *file1 = fopen("{csr_filename}", "r");
+        if (file1 == NULL) {{
+            perror("Error opening file1\\n");
+            exit(EXIT_FAILURE);
+        }}
+        FILE *file2 = fopen("Generated_dense_tensors/{matrix_filename}", "r");
+        if (file2 == NULL) {{
+            perror("Error opening file2\\n");
+            exit(EXIT_FAILURE);
+        }}
+        memset(x, 0, sizeof(double)*{sparse_cols*dense_cols});
+        memset(csr_val, 0, sizeof(double)*{nnz});
+        memset(indices, 0, sizeof(int)*{nnz});
+        memset(indptr, 0, sizeof(int)*({sparse_rows} + 1));
+        char c;
+        int x_size=0, val_size=0;
+        assert(fscanf(file1, "indptr=[%c", &c) == 1);
+        if (c != ']') {{
+            ungetc(c, file1);
+            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+            val_size++;
+            while (1) {{
+                assert(fscanf(file1, "%c", &c) == 1);
+                if (c == ',') {{
+                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+                    val_size++;
+                }} else if (c == ']') {{
+                    break;
+                }} else {{
+                    assert(0);
+                }}
+            }}
+        }}
+        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
+        val_size=0;
+        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
         val_size++;
         while (1) {{
             assert(fscanf(file1, "%c", &c) == 1);
             if (c == ',') {{
-                assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
                 val_size++;
             }} else if (c == ']') {{
                 break;
@@ -186,46 +205,27 @@ int main() {{
                 assert(0);
             }}
         }}
-    }}
-    assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
-    val_size=0;
-    assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
-    val_size++;
-    while (1) {{
-        assert(fscanf(file1, "%c", &c) == 1);
-        if (c == ',') {{
-            assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
-            val_size++;
-        }} else if (c == ']') {{
-            break;
-        }} else {{
-            assert(0);
+        if(fscanf(file1, "%c", &c));
+        assert(c=='\\n');
+        val_size=0;
+        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
         }}
-    }}
-    if(fscanf(file1, "%c", &c));
-    assert(c=='\\n');
-    val_size=0;
-    assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
-    val_size++;
-    while (1) {{
-        assert(fscanf(file1, "%c", &c) == 1);
-        if (c == ',') {{
-            assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
-            val_size++;
-        }} else if (c == ']') {{
-            break;
-        }} else {{
-            assert(0);
+        fclose(file1);
+        while (x_size < {sparse_cols*dense_cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
+            x_size++;
         }}
-    }}
-    fclose(file1);
-    while (x_size < {sparse_cols*dense_cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
-        x_size++;
-    }}
-    fclose(file2);
-    struct timespec t1, t2;
-    double times[{bench_freq}];
-    for (int i = 0; i < {bench_freq}; i++) {{
+        fclose(file2);
         memset(y, 0, sizeof(double)*{sparse_rows*dense_cols});
         clock_gettime(CLOCK_MONOTONIC, &t1);
         spmm_sparse(y, csr_val, indices, indptr, x, {sparse_rows}, {dense_cols});
@@ -286,31 +286,50 @@ int main() {{
     double *csr_val = (double*)malloc({nnz} * sizeof(double));
     int *indices = (int*)malloc({nnz} * sizeof(int));
     int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
-    FILE *file1 = fopen("{csr_filename}", "r");
-    if (file1 == NULL) {{
-        perror("Error opening file1");
-        exit(EXIT_FAILURE);
-    }}
-    FILE *file2 = fopen("Generated_dense_tensors/{vector_filename}", "r");
-    if (file2 == NULL) {{
-        perror("Error opening file2");
-        exit(EXIT_FAILURE);
-    }}
-    memset(x, 0, sizeof(double)*{cols});
-    memset(csr_val, 0, sizeof(double)*{nnz});
-    memset(indices, 0, sizeof(int)*{nnz});
-    memset(indptr, 0, sizeof(int)*({rows} + 1));
-    char c;
-    int x_size=0, val_size=0;
-    assert(fscanf(file1, "indptr=[%c", &c) == 1);
-    if (c != ']') {{
-        ungetc(c, file1);
-        assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+    struct timespec t1, t2;
+    double times[{bench_freq}];
+    for (int i=0; i<{bench_freq}; i++) {{
+        FILE *file1 = fopen("{csr_filename}", "r");
+        if (file1 == NULL) {{
+            perror("Error opening file1");
+            exit(EXIT_FAILURE);
+        }}
+        FILE *file2 = fopen("Generated_dense_tensors/{vector_filename}", "r");
+        if (file2 == NULL) {{
+            perror("Error opening file2");
+            exit(EXIT_FAILURE);
+        }}
+        memset(x, 0, sizeof(double)*{cols});
+        memset(csr_val, 0, sizeof(double)*{nnz});
+        memset(indices, 0, sizeof(int)*{nnz});
+        memset(indptr, 0, sizeof(int)*({rows} + 1));
+        char c;
+        int x_size=0, val_size=0;
+        assert(fscanf(file1, "indptr=[%c", &c) == 1);
+        if (c != ']') {{
+            ungetc(c, file1);
+            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+            val_size++;
+            while (1) {{
+                assert(fscanf(file1, "%c", &c) == 1);
+                if (c == ',') {{
+                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+                    val_size++;
+                }} else if (c == ']') {{
+                    break;
+                }} else {{
+                    assert(0);
+                }}
+            }}
+        }}
+        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
+        val_size=0;
+        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
         val_size++;
         while (1) {{
             assert(fscanf(file1, "%c", &c) == 1);
             if (c == ',') {{
-                assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
                 val_size++;
             }} else if (c == ']') {{
                 break;
@@ -318,46 +337,27 @@ int main() {{
                 assert(0);
             }}
         }}
-    }}
-    assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
-    val_size=0;
-    assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
-    val_size++;
-    while (1) {{
-        assert(fscanf(file1, "%c", &c) == 1);
-        if (c == ',') {{
-            assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
-            val_size++;
-        }} else if (c == ']') {{
-            break;
-        }} else {{
-            assert(0);
+        if(fscanf(file1, "%c", &c));
+        assert(c=='\\n');
+        val_size=0;
+        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
         }}
-    }}
-    if(fscanf(file1, "%c", &c));
-    assert(c=='\\n');
-    val_size=0;
-    assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
-    val_size++;
-    while (1) {{
-        assert(fscanf(file1, "%c", &c) == 1);
-        if (c == ',') {{
-            assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
-            val_size++;
-        }} else if (c == ']') {{
-            break;
-        }} else {{
-            assert(0);
+        fclose(file1);
+        while (x_size < {cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
+            x_size++;
         }}
-    }}
-    fclose(file1);
-    while (x_size < {cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
-        x_size++;
-    }}
-    fclose(file2);
-    struct timespec t1, t2;
-    double times[{bench_freq}];
-    for (int i=0; i<{bench_freq}; i++) {{
+        fclose(file2);
         memset(y, 0, sizeof(double)*{rows});
         clock_gettime(CLOCK_MONOTONIC, &t1);
         spmv_sparse(y, csr_val, indices, indptr, x, {rows});
