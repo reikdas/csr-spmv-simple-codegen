@@ -1,8 +1,8 @@
-import sys
+import csv
+import glob
 import os
 import subprocess
-import glob
-import csv
+import sys
 from pathlib import Path
 
 CFLAGS = ["-O3", "-march=native", "-funroll-all-loops", "-mprefer-vector-width=512", "-mavx", "-ffast-math", "-I/home/min/a/das160/papi-install/include"]
@@ -99,9 +99,9 @@ def execute_program(executable_name="spmv"):
         timing_info = extract_timing(result.stdout)
         if timing_info is not None:
             print("\n" + "=" * 60)
-            print("Branch Mispred RESULTS")
+            print("RESULTS")
             print("=" * 60)
-            print(f"Branch mispredictions: {timing_info:.6f}")
+            print(f"{timing_info:.6f}")
             print("=" * 60)
             return timing_info
         return None
@@ -128,7 +128,7 @@ def extract_timing(output_text):
     except (ValueError, IndexError):
         return None
     
-def generate_spmm(csr_filename, matrix_filename, sparse_rows, sparse_cols, dense_cols, nnz, output_filename, bench_freq):
+def generate_spmm_br_mispreds(csr_filename, matrix_filename, sparse_rows, sparse_cols, dense_cols, nnz, output_filename, bench_freq):
     c_code = f"""
 #include <stdio.h>
 #include <time.h>
@@ -281,7 +281,7 @@ int main() {{
         sys.exit(1)
 
 
-def generate_spmv(csr_filename, vector_filename, rows, cols, nnz, output_filename, bench_freq):
+def generate_spmv_br_mispreds(csr_filename, vector_filename, rows, cols, nnz, output_filename, bench_freq):
     c_code = f"""
 #include <stdio.h>
 #include <time.h>
@@ -439,14 +439,281 @@ int main() {{
         print(f"Error generating C program: {e}")
         sys.exit(1)
 
-def csr_operation(csr_filepath, operation_type, bench_freq):
-    """
-    Generic function to process a CSR file and run SpMM or SpMV evaluation.
+def generate_spmm_timing(csr_filename, matrix_filename, sparse_rows, sparse_cols, dense_cols, nnz, output_filename, bench_freq):
+    c_code = f"""
+#include <stdio.h>
+#include <time.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+
+void spmm_sparse(double *restrict y, const double *restrict csr_val, const int *restrict indices, const int *restrict indptr, const double *restrict x, const int sparse_rows, const int dense_cols) {{
+    for (int i = 0; i < sparse_rows; i++) {{
+        for (int p = indptr[i]; p < indptr[i+1]; p++) {{
+            int col = indices[p];
+            double val = csr_val[p];
+            for (int j = 0; j < dense_cols; ++j) {{
+                y[i * dense_cols + j] += val * x[col * dense_cols + j];
+            }}
+        }}
+    }}
+}}
+
+int main() {{
+    double *y = (double*)malloc({sparse_rows*dense_cols}*sizeof(double));
+    double *x = (double*)malloc({sparse_cols*dense_cols}*sizeof(double));
+    double *csr_val = (double*)malloc({nnz}*sizeof(double));
+    int *indices = (int*)malloc({nnz}*sizeof(int));
+    int *indptr = (int*)malloc(({sparse_rows + 1}) * sizeof(int));
+    struct timespec t1, t2;
+    double times[{bench_freq}];
+    for (int i = 0; i < {bench_freq}; i++) {{
+        FILE *file1 = fopen("{csr_filename}", "r");
+        if (file1 == NULL) {{
+            perror("Error opening file1\\n");
+            exit(EXIT_FAILURE);
+        }}
+        FILE *file2 = fopen("Generated_dense_tensors/{matrix_filename}", "r");
+        if (file2 == NULL) {{
+            perror("Error opening file2\\n");
+            exit(EXIT_FAILURE);
+        }}
+        memset(x, 0, sizeof(double)*{sparse_cols*dense_cols});
+        memset(csr_val, 0, sizeof(double)*{nnz});
+        memset(indices, 0, sizeof(int)*{nnz});
+        memset(indptr, 0, sizeof(int)*({sparse_rows} + 1));
+        char c;
+        int x_size=0, val_size=0;
+        assert(fscanf(file1, "indptr=[%c", &c) == 1);
+        if (c != ']') {{
+            ungetc(c, file1);
+            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+            val_size++;
+            while (1) {{
+                assert(fscanf(file1, "%c", &c) == 1);
+                if (c == ',') {{
+                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+                    val_size++;
+                }} else if (c == ']') {{
+                    break;
+                }} else {{
+                    assert(0);
+                }}
+            }}
+        }}
+        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
+        val_size=0;
+        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
+        }}
+        if(fscanf(file1, "%c", &c));
+        assert(c=='\\n');
+        val_size=0;
+        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
+        }}
+        fclose(file1);
+        while (x_size < {sparse_cols*dense_cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
+            x_size++;
+        }}
+        fclose(file2);
+        memset(y, 0, sizeof(double)*{sparse_rows*dense_cols});
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        spmm_sparse(y, csr_val, indices, indptr, x, {sparse_rows}, {dense_cols});
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        times[i] = (t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec);
+    }}
+    for (int i=0; i<{bench_freq-1}; i++) {{
+        for (int j=i+1; j<{bench_freq}; j++) {{
+            if (times[j] < times[i]) {{
+                double temp = times[i];
+                times[i] = times[j];
+                times[j] = temp;
+            }}
+        }}
+    }}
+    printf("Time: %.2f ns\\n", times[{bench_freq // 2}]);
+    for (int i=0; i<{sparse_rows * dense_cols}; i++) {{
+        printf("%.2f\\n", y[i]);
+    }}
+    free(y);
+    free(x);
+    free(csr_val);
+    free(indptr);
+    free(indices);
+}}"""
+    try:
+        with open(output_filename, 'w') as f:
+            f.write(c_code)
+        print(f"C program generated and saved to {output_filename}")
+        return output_filename
+    except Exception as e:
+        print(f"Error generating C program: {e}")
+        sys.exit(1)
+
+
+def generate_spmv_timing(csr_filename, vector_filename, rows, cols, nnz, output_filename, bench_freq):
+    c_code = f"""
+#include <stdio.h>
+#include <time.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+
+void spmv_sparse(double *restrict y, const double *restrict csr_val, const int *restrict indices, const int *restrict indptr, const double *restrict x, const int rpntr_size) {{
+	double sum = 0;
+    for (int i = 0; i < rpntr_size; i++) {{
+        sum = 0;
+		for (int j = indptr[i]; j < indptr[i+1]; j++) {{
+			sum += csr_val[j] * x[indices[j]];
+		}}
+        y[i] = sum;
+	}}
+}}
+
+int main() {{
+    double *y = (double*)malloc({rows} * sizeof(double));
+    double *x = (double*)malloc({cols} * sizeof(double));
+    double *csr_val = (double*)malloc({nnz} * sizeof(double));
+    int *indices = (int*)malloc({nnz} * sizeof(int));
+    int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
+    struct timespec t1, t2;
+    double times[{bench_freq}];
+    for (int i=0; i<{bench_freq}; i++) {{
+        FILE *file1 = fopen("{csr_filename}", "r");
+        if (file1 == NULL) {{
+            perror("Error opening file1");
+            exit(EXIT_FAILURE);
+        }}
+        FILE *file2 = fopen("Generated_dense_tensors/{vector_filename}", "r");
+        if (file2 == NULL) {{
+            perror("Error opening file2");
+            exit(EXIT_FAILURE);
+        }}
+        memset(x, 0, sizeof(double)*{cols});
+        memset(csr_val, 0, sizeof(double)*{nnz});
+        memset(indices, 0, sizeof(int)*{nnz});
+        memset(indptr, 0, sizeof(int)*({rows} + 1));
+        char c;
+        int x_size=0, val_size=0;
+        assert(fscanf(file1, "indptr=[%c", &c) == 1);
+        if (c != ']') {{
+            ungetc(c, file1);
+            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+            val_size++;
+            while (1) {{
+                assert(fscanf(file1, "%c", &c) == 1);
+                if (c == ',') {{
+                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+                    val_size++;
+                }} else if (c == ']') {{
+                    break;
+                }} else {{
+                    assert(0);
+                }}
+            }}
+        }}
+        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
+        val_size=0;
+        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
+        }}
+        if(fscanf(file1, "%c", &c));
+        assert(c=='\\n');
+        val_size=0;
+        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
+        }}
+        fclose(file1);
+        while (x_size < {cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
+            x_size++;
+        }}
+        fclose(file2);
+        memset(y, 0, sizeof(double)*{rows});
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        spmv_sparse(y, csr_val, indices, indptr, x, {rows});
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        times[i] = (t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec);
+    }}
+    for (int i=0; i<{bench_freq - 1}; i++) {{
+        for (int j=i+1; j<{bench_freq}; j++) {{
+            if (times[j] < times[i]) {{
+                double temp = times[i];
+                times[i] = times[j];
+                times[j] = temp;
+            }}
+        }}
+    }}
+    printf("Time: %.2f ns\\n", times[{bench_freq // 2}]);
+    for (int i=0; i<{rows}; i++) {{
+        printf("%.2f\\n", y[i]);
+    }}
+    free(y);
+    free(x);
+    free(csr_val);
+    free(indptr);
+    free(indices);
+}}"""
+    try:
+        with open(output_filename, 'w') as f:
+            f.write(c_code)
+        print(f"C program generated and saved to {output_filename}")
+        return output_filename
+    except Exception as e:
+        print(f"Error generating C program: {e}")
+        sys.exit(1)
+
+def csr_operation(csr_filepath, operation_type, bench_freq, result_type):
+
+    if result_type == "br_mispreds":
+        spmv_func = generate_spmv_br_mispreds
+        spmm_func = generate_spmm_br_mispreds
+    elif result_type == "timing":
+        spmv_func = generate_spmv_timing
+        spmm_func = generate_spmm_timing
+    else:
+        raise Exception(f"Invalid result type: {result_type}")
     
-    Args:
-        csr_filepath: Path to the CSR file
-        operation_type: Either 'spmm' or 'spmv'
-    """
     print(f"\n{'='*80}")
     print(f"Processing: {csr_filepath}")
     print(f"{'='*80}")
@@ -460,7 +727,7 @@ def csr_operation(csr_filepath, operation_type, bench_freq):
         tensor_filename = f"generated_matrix_{cols}x{512}.matrix"
         
         # Generate C program for SpMM
-        c_filename = generate_spmm(
+        c_filename = spmm_func(
             csr_filepath,
             tensor_filename,
             rows,
@@ -476,7 +743,7 @@ def csr_operation(csr_filepath, operation_type, bench_freq):
         tensor_filename = f"generated_vector_{cols}.vector"
         
         # Generate C program for SpMV
-        c_filename = generate_spmv(
+        c_filename = spmv_func(
             csr_filepath,
             tensor_filename,
             rows=rows,
@@ -494,31 +761,32 @@ def csr_operation(csr_filepath, operation_type, bench_freq):
         print(f"Skipping execution for {csr_filepath}_{operation_type} due to compilation failure.")
         return False
 
-def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq):
-    """
-    Generic function to run sparse operations (SpMM or SpMV) with different reduction types.
+def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, result_type):
+    if result_type == "br_mispreds":
+        f_name = "papi"
+        col_name = "branch_mispreds"
+    elif result_type == "timing":
+        f_name = "timing"
+        col_name = "time"
+    else:
+        raise Exception(f"Invalid result type: {result_type}")
     
-    Args:
-        matrix: Matrix name
-        operation_type: Either 'spmm' or 'spmv'
-        reduction_type: Either 'consec', 'truncated', or 'random'
-    """
     timing_results = {}
     
     # Process original matrix (100%)
-    timing_results[100] = csr_operation(f"csr_files/{matrix}.csr", operation_type, bench_freq)
+    timing_results[100] = csr_operation(f"csr_files/{matrix}.csr", operation_type, bench_freq, result_type)
     
     # Process reduced CSR files
     csr_files = glob.glob(f"csr_files/{matrix}_{reduction_type}_*pct.csr")
     for csr_file in csr_files:
         reduction_pct = csr_file.split(f"{reduction_type}_")[1].split("pct.csr")[0]
         percentage = 100 - int(reduction_pct)
-        timing_results[percentage] = csr_operation(csr_file, operation_type, bench_freq)
+        timing_results[percentage] = csr_operation(csr_file, operation_type, bench_freq, result_type)
 
     # Write results to CSV
-    with open(f"results/papi_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
+    with open(f"results/{f_name}_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Percentage', 'branch_mispreds'])
+        writer.writerow(['Percentage', col_name])
         
         # Sort results by percentage (descending)
         sorted_results = sorted(timing_results.items(), key=lambda x: x[0], reverse=True)
@@ -531,10 +799,9 @@ def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq):
 
 if __name__ == "__main__":
     matrices = [p.stem for p in Path("matrices").glob("*.mtx")]
-    # ops = ["spmv", "spmm"]
-    ops = ["spmv"]
+    ops = ["spmv", "spmm"]
     reduction_types = ["random", "truncated", "consec"]
     for matrix in matrices:
         for op in ops:
             for reduction_type in reduction_types:
-                run_sparse_operation(matrix, op, reduction_type, 100)
+                run_sparse_operation(matrix, op, reduction_type, 100, "br_mispreds")
