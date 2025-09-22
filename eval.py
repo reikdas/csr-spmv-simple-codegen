@@ -793,7 +793,7 @@ def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, res
         # print(sorted_results)
         
         for percentage, time in sorted_results:
-            if time is not False:
+            if time is not False and time is not None:
                 # print(percentage, time)
                 writer.writerow([percentage, f"{time:.6f}"])
 
