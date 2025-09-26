@@ -283,8 +283,8 @@ if __name__ == "__main__":
 
                 create_csr_variants(mat.name)
 
-                run_sparse_operation(mat.name, "SpMV", "random", 100, "br_mispreds")
-                run_sparse_operation(mat.name, "SpMV", "random", 100, "timing")
+                run_sparse_operation(mat.name, "SpMV", "random", 100, "br_mispreds_mkl")
+                run_sparse_operation(mat.name, "SpMV", "random", 100, "timing_mkl")
                 
                 # Calculate slope of nnz rows vs density
                 nnz_rows_slope = calculate_nnz_rows_slope(mat.name, "random")

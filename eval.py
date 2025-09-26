@@ -10,6 +10,8 @@ CFLAGS = ["-O3", "-march=native", "-funroll-all-loops", "-mprefer-vector-width=5
 # Global variable to store timing results
 timing_results = []
 
+MKL_PATH = "/home/min/a/das160/intel/oneapi/mkl/latest/"
+
 def write_dense_vector(val: float, size: int):
     """Inline version of write_dense_vector function."""
     filename = f"generated_vector_{size}.vector"
@@ -65,10 +67,20 @@ def read_csr_file(filepath):
         print(f"Error reading .csr file {filepath}: {e}")
         return None, None, None
 
-def compile_c_program(c_filename, executable_name="spmv"):
+def compile_c_program(c_filename, executable_name="spmv", use_mkl=False):
     """Compile the C program using the flags from consts.py."""
     try:
         compile_cmd = ["gcc"] + CFLAGS + ["-o", executable_name, c_filename] + ["-L/home/min/a/das160/papi-install/lib", "-lpapi"]
+        
+        if use_mkl:
+            # Add MKL libraries and include paths
+            mkl_flags = [
+                f"-I{MKL_PATH}/include", 
+                f"-L{MKL_PATH}/lib/intel64",
+                "-lmkl_intel_lp64", "-lmkl_sequential", "-lmkl_core",
+                "-lm", "-lpthread"  # Add math library and pthread for MKL dependencies
+            ]
+            compile_cmd.extend(mkl_flags)
         
         print(f"Compiling C program...")
         print(f"Command: {' '.join(compile_cmd)}")
@@ -439,6 +451,175 @@ int main() {{
         print(f"Error generating C program: {e}")
         sys.exit(1)
 
+def generate_spmv_br_mispreds_mkl(csr_filename, vector_filename, rows, cols, nnz, output_filename, bench_freq):
+    c_code = f"""
+#include <stdio.h>
+#include <time.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <papi.h>
+#include <mkl.h>
+#include <mkl_spblas.h>
+
+int main() {{
+    // Set MKL to use single thread for consistent timing
+    mkl_set_num_threads(1);
+    
+    int EventSet = PAPI_NULL;
+    if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT) {{
+        fprintf(stderr, "PAPI library init error!\\n");
+        exit(1);
+    }}
+    if (PAPI_create_eventset(&EventSet) != PAPI_OK) {{
+        fprintf(stderr, "PAPI_create_eventset failed\\n");
+        exit(1);
+    }}
+    int events[] = {{
+        PAPI_BR_MSP, PAPI_BR_CN
+    }};
+    int num_events = sizeof(events) / sizeof(events[0]);
+    for (int i = 0; i < num_events; i++) {{
+        if (PAPI_add_event(EventSet, events[i]) != PAPI_OK) {{
+            fprintf(stderr, "PAPI_add_event failed for event %d\\n", events[i]);
+            exit(1);
+        }}
+    }}
+    double *y = (double*)malloc({rows} * sizeof(double));
+    double *x = (double*)malloc({cols} * sizeof(double));
+    double *csr_val = (double*)malloc({nnz} * sizeof(double));
+    int *indices = (int*)malloc({nnz} * sizeof(int));
+    int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
+    struct timespec t1, t2;
+    long long event_times[{bench_freq}][num_events];
+    float times[{bench_freq}];
+    
+    // MKL sparse matrix handle
+    sparse_matrix_t A = NULL;
+    struct matrix_descr descrA;
+    descrA.type = SPARSE_MATRIX_TYPE_GENERAL;
+    descrA.mode = SPARSE_FILL_MODE_FULL;
+    descrA.diag = SPARSE_DIAG_NON_UNIT;
+    
+    for (int i=0; i<{bench_freq}; i++) {{
+        FILE *file1 = fopen("{csr_filename}", "r");
+        if (file1 == NULL) {{
+            perror("Error opening file1");
+            exit(EXIT_FAILURE);
+        }}
+        FILE *file2 = fopen("Generated_dense_tensors/{vector_filename}", "r");
+        if (file2 == NULL) {{
+            perror("Error opening file2");
+            exit(EXIT_FAILURE);
+        }}
+        memset(x, 0, sizeof(double)*{cols});
+        memset(csr_val, 0, sizeof(double)*{nnz});
+        memset(indices, 0, sizeof(int)*{nnz});
+        memset(indptr, 0, sizeof(int)*({rows} + 1));
+        char c;
+        int x_size=0, val_size=0;
+        assert(fscanf(file1, "indptr=[%c", &c) == 1);
+        if (c != ']') {{
+            ungetc(c, file1);
+            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+            val_size++;
+            while (1) {{
+                assert(fscanf(file1, "%c", &c) == 1);
+                if (c == ',') {{
+                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+                    val_size++;
+                }} else if (c == ']') {{
+                    break;
+                }} else {{
+                    assert(0);
+                }}
+            }}
+        }}
+        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
+        val_size=0;
+        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
+        }}
+        if(fscanf(file1, "%c", &c));
+        assert(c=='\\n');
+        val_size=0;
+        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
+        }}
+        fclose(file1);
+        while (x_size < {cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
+            x_size++;
+        }}
+        fclose(file2);
+        memset(y, 0, sizeof(double)*{rows});
+        
+        // Create MKL sparse matrix from CSR format
+        mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, {rows}, {cols}, indptr, indptr+1, indices, csr_val);
+        
+        if (PAPI_start(EventSet) != PAPI_OK) {{
+            fprintf(stderr, "PAPI_start failed\\n");
+            exit(1);
+        }}
+        // Perform SpMV using MKL
+        mkl_sparse_d_mv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, A, descrA, x, 0.0, y);
+        if (PAPI_stop(EventSet, event_times[i]) != PAPI_OK) {{
+            fprintf(stderr, "PAPI_stop failed\\n");
+            exit(1);
+        }}
+        times[i] = ((float)event_times[i][0]/event_times[i][1])*100;
+        
+        // Clean up MKL sparse matrix handle
+        mkl_sparse_destroy(A);
+        A = NULL;
+    }}
+    for (int i=0; i<{bench_freq - 1}; i++) {{
+        for (int j=i+1; j<{bench_freq}; j++) {{
+            if (times[j] < times[i]) {{
+                float temp = times[i];
+                times[i] = times[j];
+                times[j] = temp;
+            }}
+        }}
+    }}
+    printf("Time: %.2lf ns\\n", times[{bench_freq//2}]);
+    for (int i=0; i<{rows}; i++) {{
+        printf("%.2f\\n", y[i]);
+    }}
+    free(y);
+    free(x);
+    free(csr_val);
+    free(indptr);
+    free(indices);
+}}"""
+    try:
+        with open(output_filename, 'w') as f:
+            f.write(c_code)
+        print(f"C program generated and saved to {output_filename}")
+        return output_filename
+    except Exception as e:
+        print(f"Error generating C program: {e}")
+        sys.exit(1)
+
 def generate_spmm_timing(csr_filename, matrix_filename, sparse_rows, sparse_cols, dense_cols, nnz, output_filename, bench_freq):
     c_code = f"""
 #include <stdio.h>
@@ -703,14 +884,166 @@ int main() {{
         print(f"Error generating C program: {e}")
         sys.exit(1)
 
+def generate_spmv_timing_mkl(csr_filename, vector_filename, rows, cols, nnz, output_filename, bench_freq):
+    c_code = f"""
+#include <stdio.h>
+#include <time.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <mkl.h>
+#include <mkl_spblas.h>
+
+int main() {{
+    // Set MKL to use single thread for consistent timing
+    mkl_set_num_threads(1);
+    
+    double *y = (double*)malloc({rows} * sizeof(double));
+    double *x = (double*)malloc({cols} * sizeof(double));
+    double *csr_val = (double*)malloc({nnz} * sizeof(double));
+    int *indices = (int*)malloc({nnz} * sizeof(int));
+    int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
+    struct timespec t1, t2;
+    double times[{bench_freq}];
+    
+    // MKL sparse matrix handle
+    sparse_matrix_t A = NULL;
+    struct matrix_descr descrA;
+    descrA.type = SPARSE_MATRIX_TYPE_GENERAL;
+    descrA.mode = SPARSE_FILL_MODE_FULL;
+    descrA.diag = SPARSE_DIAG_NON_UNIT;
+    
+    for (int i=0; i<{bench_freq}; i++) {{
+        FILE *file1 = fopen("{csr_filename}", "r");
+        if (file1 == NULL) {{
+            perror("Error opening file1");
+            exit(EXIT_FAILURE);
+        }}
+        FILE *file2 = fopen("Generated_dense_tensors/{vector_filename}", "r");
+        if (file2 == NULL) {{
+            perror("Error opening file2");
+            exit(EXIT_FAILURE);
+        }}
+        memset(x, 0, sizeof(double)*{cols});
+        memset(csr_val, 0, sizeof(double)*{nnz});
+        memset(indices, 0, sizeof(int)*{nnz});
+        memset(indptr, 0, sizeof(int)*({rows} + 1));
+        char c;
+        int x_size=0, val_size=0;
+        assert(fscanf(file1, "indptr=[%c", &c) == 1);
+        if (c != ']') {{
+            ungetc(c, file1);
+            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+            val_size++;
+            while (1) {{
+                assert(fscanf(file1, "%c", &c) == 1);
+                if (c == ',') {{
+                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
+                    val_size++;
+                }} else if (c == ']') {{
+                    break;
+                }} else {{
+                    assert(0);
+                }}
+            }}
+        }}
+        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
+        val_size=0;
+        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
+        }}
+        if(fscanf(file1, "%c", &c));
+        assert(c=='\\n');
+        val_size=0;
+        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
+        val_size++;
+        while (1) {{
+            assert(fscanf(file1, "%c", &c) == 1);
+            if (c == ',') {{
+                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
+                val_size++;
+            }} else if (c == ']') {{
+                break;
+            }} else {{
+                assert(0);
+            }}
+        }}
+        fclose(file1);
+        while (x_size < {cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
+            x_size++;
+        }}
+        fclose(file2);
+        memset(y, 0, sizeof(double)*{rows});
+        
+        // Create MKL sparse matrix from CSR format
+        mkl_sparse_d_create_csr(&A, SPARSE_INDEX_BASE_ZERO, {rows}, {cols}, indptr, indptr+1, indices, csr_val);
+        
+        clock_gettime(CLOCK_MONOTONIC, &t1);
+        // Perform SpMV using MKL
+        mkl_sparse_d_mv(SPARSE_OPERATION_NON_TRANSPOSE, 1.0, A, descrA, x, 0.0, y);
+        clock_gettime(CLOCK_MONOTONIC, &t2);
+        times[i] = (t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec);
+        
+        // Clean up MKL sparse matrix handle
+        mkl_sparse_destroy(A);
+        A = NULL;
+    }}
+    for (int i=0; i<{bench_freq - 1}; i++) {{
+        for (int j=i+1; j<{bench_freq}; j++) {{
+            if (times[j] < times[i]) {{
+                double temp = times[i];
+                times[i] = times[j];
+                times[j] = temp;
+            }}
+        }}
+    }}
+    printf("Time: %.2f ns\\n", times[{bench_freq // 2}]);
+    for (int i=0; i<{rows}; i++) {{
+        printf("%.2f\\n", y[i]);
+    }}
+    free(y);
+    free(x);
+    free(csr_val);
+    free(indptr);
+    free(indices);
+}}"""
+    try:
+        with open(output_filename, 'w') as f:
+            f.write(c_code)
+        print(f"C program generated and saved to {output_filename}")
+        return output_filename
+    except Exception as e:
+        print(f"Error generating C program: {e}")
+        sys.exit(1)
+
 def csr_operation(csr_filepath, operation_type, bench_freq, result_type):
 
     if result_type == "br_mispreds":
         spmv_func = generate_spmv_br_mispreds
         spmm_func = generate_spmm_br_mispreds
+        use_mkl = False
+    elif result_type == "br_mispreds_mkl":
+        spmv_func = generate_spmv_br_mispreds_mkl
+        spmm_func = generate_spmm_br_mispreds  # MKL version for SpMM not implemented yet
+        use_mkl = True
     elif result_type == "timing":
         spmv_func = generate_spmv_timing
         spmm_func = generate_spmm_timing
+        use_mkl = False
+    elif result_type == "timing_mkl":
+        spmv_func = generate_spmv_timing_mkl
+        spmm_func = generate_spmm_timing  # MKL version for SpMM not implemented yet
+        use_mkl = True
     else:
         raise Exception(f"Invalid result type: {result_type}")
     
@@ -720,6 +1053,10 @@ def csr_operation(csr_filepath, operation_type, bench_freq, result_type):
 
     # Read CSR file to get dimensions
     rows, cols, nnz = read_csr_file(csr_filepath)
+    
+    if rows is None or cols is None or nnz is None:
+        print(f"Error: Could not read CSR file dimensions from {csr_filepath}")
+        return False
     
     if operation_type == 'spmm':
         # Generate dense matrix for SpMM
@@ -755,7 +1092,7 @@ def csr_operation(csr_filepath, operation_type, bench_freq, result_type):
         executable_name = "spmv"
     
     # Compile and execute
-    if c_filename and compile_c_program(c_filename, executable_name):
+    if c_filename and compile_c_program(c_filename, executable_name, use_mkl):
         return execute_program(executable_name)
     else:
         print(f"Skipping execution for {csr_filepath}_{operation_type} due to compilation failure.")
@@ -765,8 +1102,14 @@ def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, res
     if result_type == "br_mispreds":
         f_name = "papi"
         col_name = "branch_mispreds"
+    elif result_type == "br_mispreds_mkl":
+        f_name = "papi_mkl"
+        col_name = "branch_mispreds"
     elif result_type == "timing":
         f_name = "timing"
+        col_name = "time"
+    elif result_type == "timing_mkl":
+        f_name = "timing_mkl"
         col_name = "time"
     else:
         raise Exception(f"Invalid result type: {result_type}")
