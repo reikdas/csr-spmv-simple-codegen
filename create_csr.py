@@ -7,8 +7,8 @@ import scipy
 
 T = TypeVar("T", int, float)
 
-def parse_array(line: str, key: str, caster: Callable[[str], T]) -> Tuple[str, List[T]]:
-    """Parse a line like 'key=[a,b,c,...]' and return (prefix, typed list)."""
+def parse_array(line: str, key: str, caster: Callable[[str], T]) -> List[T]:
+    """Parse a line like 'key=[a,b,c,...]' and return typed list."""
     assert line.startswith(key + "=") or line.startswith(key + "=["), f"Line does not start with {key}="
     prefix, arr_str = line.split("=", 1)
     assert prefix.strip() == key, f"Unexpected key in line: {prefix}"
@@ -157,33 +157,147 @@ def truncate_consec_csr(csr_val: List[float], indices: List[int], indptr: List[i
         new_indptr.append(new_indptr[-1] + kept)
     return new_val, new_indices, new_indptr
 
-def save_csr_to_file(matrix_name):
-    if not os.path.exists("csr_files"):
-        os.mkdir("csr_files")
-    csr_matrix = scipy.io.mmread(f"matrices/{matrix_name}.mtx")
-    csr_matrix = csr_matrix.tocsr()
-    try:
-        with open(f"csr_files/{matrix_name}.csr", 'w') as f:
-            # Write indptr (row pointers)
-            f.write("indptr=[")
-            f.write(",".join(map(str, csr_matrix.indptr)))
-            f.write("]\n")
-            
-            # Write indices (column indices)
-            f.write("indices=[")
-            f.write(",".join(map(str, csr_matrix.indices)))
-            f.write("]\n")
-            
-            # Write data (matrix values)
-            f.write("data=[")
-            f.write(",".join(map(str, csr_matrix.data)))
-            f.write("]\n")
+
+def push_zero_rows_to_end(A):
+    import numpy as _np
+    A = A.tocsr().sorted_indices()
+    row_nnz = _np.diff(A.indptr)
+
+    nonzero_rows = _np.flatnonzero(row_nnz > 0)
+    zero_rows = _np.flatnonzero(row_nnz == 0)
+    row_perm = _np.concatenate([nonzero_rows, zero_rows]).astype(int)
+
+    A_re = A[row_perm, :]
+    return A_re, row_perm
+
+## Gray reordering 
+
+def _gray_sequence(_nbits: int):
+    for i in range(1 << _nbits):
+        yield i ^ (i >> 1)
+
+def _row_bitmap(_row_cols, _n_cols: int, _nbits: int) -> int:
+    import numpy as _np
+    if _row_cols.size == 0 or _n_cols == 0:
+        return 0
+    bins = (_row_cols.astype(_np.int64) * _nbits // max(1, _n_cols)).astype(_np.int64)
+    bm = 0
+    # unique to reduce ops
+    for b in _np.unique(bins):
+        b = int(max(0, min(int(b), _nbits - 1)))
+        bm |= (1 << b)
+    return bm
+
+def gray_reorder_csr_rows_only(A, *, nbits: int = 16, dense_threshold: int = 20):
+    """
+    Bitmap-based Gray reordering (rows only).
+      1) Build nbits-length bitmap per row over coarse column buckets.
+      2) Group rows by identical bitmap.
+      3) Emit groups in Gray-code order (successive bucket ids differ by 1 bit).
+      4) Append 'dense' rows (nnz > dense_threshold) at the end (degree-desc stable).
+    Returns (A_reordered, row_perm).
+    """
+    import numpy as _np
+    from collections import defaultdict as _defaultdict
+
+    if nbits <= 0:
+        raise ValueError("nbits must be positive")
+    A = A.tocsr().sorted_indices()
+    m, n = A.shape
+    ip, idx = A.indptr, A.indices
+    row_nnz = _np.diff(ip)
+    dense_mask = row_nnz > dense_threshold
+
+    groups = _defaultdict(list)
+    for i in range(m):
+        if dense_mask[i]:
+            continue
+        s, e = ip[i], ip[i + 1]
+        bm = _row_bitmap(idx[s:e], n, nbits)
+        groups[bm].append(i)
+
+    sparse_row_order = []
+    for g in _gray_sequence(nbits):
+        if g in groups:
+            sparse_row_order.extend(groups[g])
+
+    dense_rows = _np.flatnonzero(dense_mask)
+    if dense_rows.size:
+        dense_rows = dense_rows[_np.argsort(-row_nnz[dense_rows], kind="mergesort")]
+        row_perm = _np.concatenate([_np.asarray(sparse_row_order, dtype=int), dense_rows.astype(int)])
+    else:
+        row_perm = _np.asarray(sparse_row_order, dtype=int)
+
+    A_re = A[row_perm, :]
+    return A_re, row_perm
+
+
+## CSR writer functions
+def save_csr_data(matrix_name: str, new_val: List[float], new_indices: List[int], new_indptr: List[int], csr_dir: str = "csr_files", apply_zero_reorder: bool = False) -> None:
+    """
+    Write CSR data to file, optionally with zero rows moved to the end.
+    
+    Args:
+        matrix_name: Name of the matrix (used for filename)
+        new_val: CSR data values
+        new_indices: CSR column indices  
+        new_indptr: CSR row pointers
+        csr_dir: Directory to save the file
+        apply_zero_reorder: If True, apply zero-rows-to-end transformation
+    """
+    import os as _os
+    import numpy as _np
+    from scipy.sparse import csr_matrix as _csr
+    
+    if not _os.path.isdir(csr_dir):
+        _os.makedirs(csr_dir, exist_ok=True)
+    
+    # Create scipy CSR matrix from the provided data
+    m = len(new_indptr) - 1
+    n = (max(new_indices) + 1) if len(new_indices) > 0 else 0
+    A = _csr((_np.asarray(new_val, dtype=float),
+                _np.asarray(new_indices, dtype=int),
+                _np.asarray(new_indptr, dtype=int)),
+               shape=(m, n))
+    
+    # Apply zero-rows-to-end transformation if requested
+    if apply_zero_reorder:
+        A, _rowp0 = push_zero_rows_to_end(A)
+    
+    # Write to file
+    out_path = _os.path.join(csr_dir, f"{matrix_name}.csr")
+    with open(out_path, 'w') as f:
+        # Write indptr (row pointers)
+        f.write("indptr=[")
+        f.write(",".join(map(str, A.indptr)))
+        f.write("]\n")
         
-    except Exception as e:
-        print(f"Error saving CSR matrix: {e}")
+        # Write indices (column indices)
+        f.write("indices=[")
+        f.write(",".join(map(str, A.indices)))
+        f.write("]\n")
+        
+        # Write data (matrix values)
+        f.write("data=[")
+        f.write(",".join(map(str, A.data)))
+        f.write("]\n")
+
 
 def create_csr_variants(matrix):
-    save_csr_to_file(matrix)
+    # Load the matrix and get CSR data
+    csr_matrix = scipy.io.mmread(f"matrices/{matrix}.mtx")
+    csr_matrix = csr_matrix.tocsr()
+    
+    # Extract CSR components
+    csr_val = csr_matrix.data.tolist()
+    indices = csr_matrix.indices.tolist()
+    indptr = csr_matrix.indptr.tolist()
+    
+    # Save original CSR and reordered version
+    # save_csr_to_file(matrix)
+    save_csr_data(matrix, csr_val, indices, indptr, "csr_files", apply_zero_reorder=True)
+    
+    # Load the reordered version for further processing
     lines = load_csr_lines(f"csr_files/{matrix}.csr")
     idx_indptr = find_line_index(lines, "indptr")
     idx_indices = find_line_index(lines, "indices")
@@ -201,32 +315,22 @@ def create_csr_variants(matrix):
         # Create output filename
         output_filename = f"csr_files/{matrix}_random_{pct}pct.csr"
 
-        # Create a copy of lines for this variant
-        variant_lines = lines.copy()
-        
-        # Replace lines; keep original formatting/order otherwise
-        variant_lines[idx_val] = format_array("data", new_val)
-        variant_lines[idx_indices] = format_array("indices", new_indices)
-        variant_lines[idx_indptr] = format_array("indptr", new_indptr)
-        write_csr_lines(output_filename, variant_lines)
+        # Save the variant using save_csr_data
+        save_csr_data(f"{matrix}_random_{pct}pct", new_val, new_indices, new_indptr, "csr_files")
 
         keep_fraction = 1.0 - fraction
 
         new_val, new_indices, new_indptr = truncate_csr(csr_val, indices, indptr, keep_fraction)
         output_filename = f"csr_files/{matrix}_truncated_{pct}pct.csr"
-        variant_lines = lines.copy()
-        variant_lines[idx_val] = format_array("data", new_val)
-        variant_lines[idx_indices] = format_array("indices", new_indices)
-        variant_lines[idx_indptr] = format_array("indptr", new_indptr)
-        write_csr_lines(output_filename, variant_lines)
+        
+        # Save the variant using save_csr_data
+        save_csr_data(f"{matrix}_truncated_{pct}pct", new_val, new_indices, new_indptr, "csr_files")
 
         new_val, new_indices, new_indptr = truncate_consec_csr(csr_val, indices, indptr, keep_fraction)
         output_filename = f"csr_files/{matrix}_consec_{pct}pct.csr"
-        variant_lines = lines.copy()
-        variant_lines[idx_val] = format_array("data", new_val)
-        variant_lines[idx_indices] = format_array("indices", new_indices)
-        variant_lines[idx_indptr] = format_array("indptr", new_indptr)
-        write_csr_lines(output_filename, variant_lines)
+        
+        # Save the variant using save_csr_data
+        save_csr_data(f"{matrix}_consec_{pct}pct", new_val, new_indices, new_indptr, "csr_files")
 
 
 if __name__ == "__main__":
