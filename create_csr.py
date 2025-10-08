@@ -233,7 +233,7 @@ def gray_reorder_csr_rows_only(A, *, nbits: int = 16, dense_threshold: int = 20)
 
 
 ## CSR writer functions
-def save_csr_data(matrix_name: str, new_val: List[float], new_indices: List[int], new_indptr: List[int], csr_dir: str = "csr_files", apply_zero_reorder: bool = False) -> None:
+def save_csr_data(matrix_name: str, new_val: List[float], new_indices: List[int], new_indptr: List[int], csr_dir: str = "csr_files") -> None:
     """
     Write CSR data to file, optionally with zero rows moved to the end.
     
@@ -260,9 +260,7 @@ def save_csr_data(matrix_name: str, new_val: List[float], new_indices: List[int]
                 _np.asarray(new_indptr, dtype=int)),
                shape=(m, n))
     
-    # Apply zero-rows-to-end transformation if requested
-    if apply_zero_reorder:
-        A, _rowp0 = push_zero_rows_to_end(A)
+    A, _rowp0 = gray_reorder_csr_rows_only(A, nbits=16, dense_threshold=20)
     
     # Write to file
     out_path = _os.path.join(csr_dir, f"{matrix_name}.csr")
@@ -295,7 +293,7 @@ def create_csr_variants(matrix):
     
     # Save original CSR and reordered version
     # save_csr_to_file(matrix)
-    save_csr_data(matrix, csr_val, indices, indptr, "csr_files", apply_zero_reorder=True)
+    save_csr_data(matrix, csr_val, indices, indptr, "csr_files")
     
     # Load the reordered version for further processing
     lines = load_csr_lines(f"csr_files/{matrix}.csr")
