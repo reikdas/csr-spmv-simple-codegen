@@ -1099,18 +1099,18 @@ def csr_operation(csr_filepath, operation_type, bench_freq, result_type):
         return False
 
 def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, result_type):
-    if result_type == "br_mispreds":
+    if result_type == "br_mispreds" or result_type =="br_mispreds_mkl":
         f_name = "papi"
         col_name = "branch_mispreds"
-    elif result_type == "br_mispreds_mkl":
-        f_name = "papi_mkl"
-        col_name = "branch_mispreds"
-    elif result_type == "timing":
+    # elif result_type == "br_mispreds_mkl":
+    #     f_name = "papi_mkl"
+    #     col_name = "branch_mispreds"
+    elif result_type == "timing" or result_type == "timing_mkl":
         f_name = "timing"
         col_name = "time"
-    elif result_type == "timing_mkl":
-        f_name = "timing_mkl"
-        col_name = "time"
+    # elif result_type == "timing_mkl":
+    #     f_name = "timing_mkl"
+    #     col_name = "time"
     else:
         raise Exception(f"Invalid result type: {result_type}")
     
