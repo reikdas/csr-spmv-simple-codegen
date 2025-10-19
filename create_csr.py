@@ -286,6 +286,7 @@ def create_csr_variants(matrix):
     # Load the matrix and get CSR data
     csr_matrix = scipy.io.mmread(f"matrices/{matrix}.mtx")
     csr_matrix = csr_matrix.tocsr()
+    csr_matrix.sort_indices()
     
     # Extract CSR components
     csr_val = csr_matrix.data.tolist()
