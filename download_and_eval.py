@@ -244,7 +244,7 @@ if __name__ == "__main__":
 
         for dtype in dtypes:
             # Search for real and binary matrices with nnz between 20,000 and 20,000,000
-            matrices = search(nzbounds=(20000, 20000000), dtype=dtype, limit=10000)
+            matrices = search(nzbounds=(2000000, 20000000), dtype=dtype, limit=10000)
             print(f"Found {len(matrices)} matrices with nnz between 20,000 and 20,000,000")
 
             for mat in matrices:
