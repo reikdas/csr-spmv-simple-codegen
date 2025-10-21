@@ -85,7 +85,7 @@ def compile_c_program(c_filename, executable_name="spmv"):
         print(f"✗ Error: gcc compiler not found")
         return False
 
-def execute_program(executable_name="spmv"):
+def execute_program(executable_name):
     """Execute the compiled SpMV program and extract timing information."""
     try:
         print(f"\nExecuting program...")
@@ -95,15 +95,16 @@ def execute_program(executable_name="spmv"):
         
         print(f"✓ Execution successful!")
         
-        # Extract timing information from output
-        timing_info = extract_timing(result.stdout)
-        if timing_info is not None:
+       # Extract PAPI stats from output
+        stats = extract_timing(result.stdout)
+        if stats:
             print("\n" + "=" * 60)
-            print("RESULTS")
+            print("PAPI STATS")
             print("=" * 60)
-            print(f"{timing_info:.6f}")
+            for k, v in stats.items():
+                print(f"{k}: {v}")
             print("=" * 60)
-            return timing_info
+            return stats
         return None
     except subprocess.CalledProcessError as e:
         print(f"✗ Execution failed:")
@@ -116,16 +117,18 @@ def execute_program(executable_name="spmv"):
         return None
 
 def extract_timing(output_text):
-    """Extract timing information from the program output."""
     try:
-        # Look for the median timing line in the output
+        # Look for the PAPI stats line in the output
         for line in output_text.split('\n'):
-            if "Time:" in line:
-                # Extract the time value
-                time_str = line.split(":")[-1].strip().split()[0]
-                return float(time_str)
+            if "L1_DCM:" in line and "L1_ICM:" in line:
+                # Extract all stats from the line
+                stats = {}
+                for stat in ["L1_DCM", "L1_ICM", "L2_DCM", "L2_ICM", "L1_TCM", "L2_TCM", "L3_TCM"]:
+                    part = line.split(f"{stat}:")[-1].split(",")[0].strip()
+                    stats[stat] = int(part)
+                return stats
         return None
-    except (ValueError, IndexError):
+    except Exception:
         return None
     
 def generate_spmm_br_mispreds(csr_filename, matrix_filename, sparse_rows, sparse_cols, dense_cols, nnz, output_filename, bench_freq):
@@ -281,7 +284,7 @@ int main() {{
         sys.exit(1)
 
 
-def generate_spmv_br_mispreds(csr_filename, vector_filename, rows, cols, nnz, output_filename, bench_freq):
+def generate_spmv_cache(csr_filename, vector_filename, rows, cols, nnz, output_filename, bench_freq):
     c_code = f"""
 #include <stdio.h>
 #include <time.h>
@@ -291,14 +294,14 @@ def generate_spmv_br_mispreds(csr_filename, vector_filename, rows, cols, nnz, ou
 #include <papi.h>
 
 void spmv_sparse(double *restrict y, const double *restrict csr_val, const int *restrict indices, const int *restrict indptr, const double *restrict x, const int rpntr_size) {{
-	double sum = 0;
+    double sum = 0;
     for (int i = 0; i < rpntr_size; i++) {{
         sum = 0;
-		for (int j = indptr[i]; j < indptr[i+1]; j++) {{
-			sum += csr_val[j] * x[indices[j]];
-		}}
+        for (int j = indptr[i]; j < indptr[i+1]; j++) {{
+            sum += csr_val[j] * x[indices[j]];
+        }}
         y[i] = sum;
-	}}
+    }}
 }}
 
 int main() {{
@@ -312,12 +315,14 @@ int main() {{
         exit(1);
     }}
     int events[] = {{
-        PAPI_BR_MSP, PAPI_BR_CN
+        PAPI_L1_DCM, PAPI_L1_ICM, PAPI_L2_DCM, PAPI_L2_ICM,
+        PAPI_L1_TCM, PAPI_L2_TCM, PAPI_L3_TCM
     }};
     int num_events = sizeof(events) / sizeof(events[0]);
-    for (int i = 0; i < num_events; i++) {{
-        if (PAPI_add_event(EventSet, events[i]) != PAPI_OK) {{
-            fprintf(stderr, "PAPI_add_event failed for event %d\\n", events[i]);
+    for (int i=0; i<num_events; i++) {{
+        int bla = PAPI_add_event(EventSet, events[i]);
+        if (bla != PAPI_OK) {{
+            fprintf(stderr, "PAPI_add_event failed with code %d\\n", bla);
             exit(1);
         }}
     }}
@@ -327,9 +332,9 @@ int main() {{
     int *indices = (int*)malloc({nnz} * sizeof(int));
     int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
     struct timespec t1, t2;
-    long long event_times[{bench_freq}][num_events];
-    float times[{bench_freq}];
+    long long times[{bench_freq}][num_events];
     for (int i=0; i<{bench_freq}; i++) {{
+        memset(y, 0, sizeof(double)*{rows});
         FILE *file1 = fopen("{csr_filename}", "r");
         if (file1 == NULL) {{
             perror("Error opening file1");
@@ -399,28 +404,18 @@ int main() {{
             x_size++;
         }}
         fclose(file2);
-        memset(y, 0, sizeof(double)*{rows});
         if (PAPI_start(EventSet) != PAPI_OK) {{
             fprintf(stderr, "PAPI_start failed\\n");
             exit(1);
         }}
         spmv_sparse(y, csr_val, indices, indptr, x, {rows});
-        if (PAPI_stop(EventSet, event_times[i]) != PAPI_OK) {{
+        if (PAPI_stop(EventSet, &times[i]) != PAPI_OK) {{
             fprintf(stderr, "PAPI_stop failed\\n");
             exit(1);
         }}
-        times[i] = ((float)event_times[i][0]/event_times[i][1])*100;
     }}
-    for (int i=0; i<{bench_freq - 1}; i++) {{
-        for (int j=i+1; j<{bench_freq}; j++) {{
-            if (times[j] < times[i]) {{
-                float temp = times[i];
-                times[i] = times[j];
-                times[j] = temp;
-            }}
-        }}
-    }}
-    printf("Time: %.2lf ns\\n", times[{bench_freq//2}]);
+    printf("L1_DCM: %lld, L1_ICM: %lld, L2_DCM: %lld, L2_ICM: %lld, L1_TCM: %lld, L2_TCM: %lld, L3_TCM: %lld\\n",
+        times[{bench_freq//2}][0], times[{bench_freq//2}][1], times[{bench_freq//2}][2], times[{bench_freq//2}][3], times[{bench_freq//2}][4], times[{bench_freq//2}][5], times[{bench_freq//2}][6]);
     for (int i=0; i<{rows}; i++) {{
         printf("%.2f\\n", y[i]);
     }}
@@ -703,16 +698,9 @@ int main() {{
         print(f"Error generating C program: {e}")
         sys.exit(1)
 
-def csr_operation(csr_filepath, operation_type, bench_freq, result_type):
-
-    if result_type == "br_mispreds":
-        spmv_func = generate_spmv_br_mispreds
-        spmm_func = generate_spmm_br_mispreds
-    elif result_type == "timing":
-        spmv_func = generate_spmv_timing
-        spmm_func = generate_spmm_timing
-    else:
-        raise Exception(f"Invalid result type: {result_type}")
+def csr_operation(csr_filepath, operation_type, bench_freq):
+    spmv_func = generate_spmv_cache
+    spmm_func = generate_spmm_br_mispreds
     
     print(f"\n{'='*80}")
     print(f"Processing: {csr_filepath}")
@@ -761,47 +749,28 @@ def csr_operation(csr_filepath, operation_type, bench_freq, result_type):
         print(f"Skipping execution for {csr_filepath}_{operation_type} due to compilation failure.")
         return False
 
-def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, result_type):
-    if result_type == "br_mispreds":
-        f_name = "papi"
-        col_name = "branch_mispreds"
-    elif result_type == "timing":
-        f_name = "timing"
-        col_name = "time"
-    else:
-        raise Exception(f"Invalid result type: {result_type}")
-    
-    timing_results = {}
+def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq):
+    papi_results = {}
+    papi_keys = ["L1_DCM", "L1_ICM", "L2_DCM", "L2_ICM", "L1_TCM", "L2_TCM", "L3_TCM"]
     
     # Process original matrix (100%)
-    timing_results[100] = csr_operation(f"csr_files/{matrix}.csr", operation_type, bench_freq, result_type)
+    papi_results[100] = csr_operation(f"csr_files/{matrix}.csr", operation_type, bench_freq)
     
     # Process reduced CSR files
     csr_files = glob.glob(f"csr_files/{matrix}_{reduction_type}_*pct.csr")
     for csr_file in csr_files:
         reduction_pct = csr_file.split(f"{reduction_type}_")[1].split("pct.csr")[0]
         percentage = 100 - int(reduction_pct)
-        timing_results[percentage] = csr_operation(csr_file, operation_type, bench_freq, result_type)
+        papi_results[percentage] = csr_operation(csr_file, operation_type, bench_freq)
 
     # Write results to CSV
-    with open(f"results/{f_name}_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
+    with open(f"results/papi_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Percentage', col_name])
-        
-        # Sort results by percentage (descending)
-        sorted_results = sorted(timing_results.items(), key=lambda x: x[0], reverse=True)
-        # print(sorted_results)
-        
-        for percentage, time in sorted_results:
-            if time is not False and time is not None:
-                # print(percentage, time)
-                writer.writerow([percentage, f"{time:.6f}"])
+        writer.writerow(["Percentage"] + papi_keys)
 
-if __name__ == "__main__":
-    matrices = [p.stem for p in Path("matrices").glob("*.mtx")]
-    ops = ["spmv", "spmm"]
-    reduction_types = ["random", "truncated", "consec"]
-    for matrix in matrices:
-        for op in ops:
-            for reduction_type in reduction_types:
-                run_sparse_operation(matrix, op, reduction_type, 100, "br_mispreds")
+        # Sort results by percentage (descending)
+        sorted_results = sorted(papi_results.items(), key=lambda x: x[0], reverse=True)
+
+        for percentage, stats in sorted_results:
+            if stats and isinstance(stats, dict):
+                writer.writerow([percentage] + [stats.get(k, "") for k in papi_keys])
