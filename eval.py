@@ -2,6 +2,7 @@ import csv
 import glob
 import os
 import subprocess
+import shutil
 import sys
 from pathlib import Path
 
@@ -85,13 +86,26 @@ def compile_c_program(c_filename, executable_name="spmv"):
         print(f"✗ Error: gcc compiler not found")
         return False
 
-def execute_program(executable_name="spmv"):
+def execute_program(executable_name, mtx_path):
     """Execute the compiled SpMV program and extract timing information."""
     try:
         print(f"\nExecuting program...")
-        print(f"Command: ./{executable_name}")
-        
-        result = subprocess.run([f"./{executable_name}"], capture_output=True, text=True, check=True)
+        print(f"Command: {executable_name} {mtx_path}")
+        # Resolve the executable path and ensure it's executable.
+        resolved_exec = executable_name
+        # If a simple name was provided, try to find it on PATH
+        if not os.path.isabs(resolved_exec):
+            which_res = shutil.which(resolved_exec)
+            if which_res:
+                resolved_exec = which_res
+
+        if not os.path.exists(resolved_exec) or not os.access(resolved_exec, os.X_OK):
+            # Raise FileNotFoundError to be handled below with a friendly message
+            raise FileNotFoundError(f"Executable not found or not executable: {resolved_exec}")
+
+        # Call subprocess with a list of arguments (no shell). This avoids trying to
+        # execute a single string containing both the program and its argument.
+        result = subprocess.run([resolved_exec, mtx_path], capture_output=True, text=True, check=True)
         
         print(f"✓ Execution successful!")
         
@@ -127,639 +141,22 @@ def extract_timing(output_text):
         return None
     except (ValueError, IndexError):
         return None
-    
-def generate_spmm_br_mispreds(csr_filename, matrix_filename, sparse_rows, sparse_cols, dense_cols, nnz, output_filename, bench_freq):
-    c_code = f"""
-#include <stdio.h>
-#include <time.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <papi.h>
-
-void spmm_sparse(double *restrict y, const double *restrict csr_val, const int *restrict indices, const int *restrict indptr, const double *restrict x, const int sparse_rows, const int dense_cols) {{
-    for (int i = 0; i < sparse_rows; i++) {{
-        for (int p = indptr[i]; p < indptr[i+1]; p++) {{
-            int col = indices[p];
-            double val = csr_val[p];
-            for (int j = 0; j < dense_cols; ++j) {{
-                y[i * dense_cols + j] += val * x[col * dense_cols + j];
-            }}
-        }}
-    }}
-}}
-
-int main() {{
-    int EventSet = PAPI_NULL;
-    if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT) {{
-        fprintf(stderr, "PAPI library init error!\\n");
-        exit(1);
-    }}
-    if (PAPI_create_eventset(&EventSet) != PAPI_OK) {{
-        fprintf(stderr, "PAPI_create_eventset failed\\n");
-        exit(1);
-    }}
-    int bla = PAPI_add_event(EventSet, PAPI_TOT_CYC);
-    if (bla != PAPI_OK) {{
-        fprintf(stderr, "PAPI_add_event failed with code %d\\n", bla);
-        exit(1);
-    }}
-    double *y = (double*)malloc({sparse_rows*dense_cols}*sizeof(double));
-    double *x = (double*)malloc({sparse_cols*dense_cols}*sizeof(double));
-    double *csr_val = (double*)malloc({nnz}*sizeof(double));
-    int *indices = (int*)malloc({nnz}*sizeof(int));
-    int *indptr = (int*)malloc(({sparse_rows + 1}) * sizeof(int));
-    struct timespec t1, t2;
-    long long times[{bench_freq}];
-    for (int i = 0; i < {bench_freq}; i++) {{
-        FILE *file1 = fopen("{csr_filename}", "r");
-        if (file1 == NULL) {{
-            perror("Error opening file1\\n");
-            exit(EXIT_FAILURE);
-        }}
-        FILE *file2 = fopen("Generated_dense_tensors/{matrix_filename}", "r");
-        if (file2 == NULL) {{
-            perror("Error opening file2\\n");
-            exit(EXIT_FAILURE);
-        }}
-        memset(x, 0, sizeof(double)*{sparse_cols*dense_cols});
-        memset(csr_val, 0, sizeof(double)*{nnz});
-        memset(indices, 0, sizeof(int)*{nnz});
-        memset(indptr, 0, sizeof(int)*({sparse_rows} + 1));
-        char c;
-        int x_size=0, val_size=0;
-        assert(fscanf(file1, "indptr=[%c", &c) == 1);
-        if (c != ']') {{
-            ungetc(c, file1);
-            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
-            val_size++;
-            while (1) {{
-                assert(fscanf(file1, "%c", &c) == 1);
-                if (c == ',') {{
-                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
-                    val_size++;
-                }} else if (c == ']') {{
-                    break;
-                }} else {{
-                    assert(0);
-                }}
-            }}
-        }}
-        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
-        val_size=0;
-        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
-        val_size++;
-        while (1) {{
-            assert(fscanf(file1, "%c", &c) == 1);
-            if (c == ',') {{
-                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
-                val_size++;
-            }} else if (c == ']') {{
-                break;
-            }} else {{
-                assert(0);
-            }}
-        }}
-        if(fscanf(file1, "%c", &c));
-        assert(c=='\\n');
-        val_size=0;
-        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
-        val_size++;
-        while (1) {{
-            assert(fscanf(file1, "%c", &c) == 1);
-            if (c == ',') {{
-                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
-                val_size++;
-            }} else if (c == ']') {{
-                break;
-            }} else {{
-                assert(0);
-            }}
-        }}
-        fclose(file1);
-        while (x_size < {sparse_cols*dense_cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
-            x_size++;
-        }}
-        fclose(file2);
-        memset(y, 0, sizeof(double)*{sparse_rows*dense_cols});
-        if (PAPI_start(EventSet) != PAPI_OK) {{
-            fprintf(stderr, "PAPI_start failed\\n");
-            exit(1);
-        }}
-        spmm_sparse(y, csr_val, indices, indptr, x, {sparse_rows}, {dense_cols});
-        if (PAPI_stop(EventSet, &times[i]) != PAPI_OK) {{
-            fprintf(stderr, "PAPI_stop failed\\n");
-            exit(1);
-        }}
-    }}
-    for (int i=0; i<{bench_freq-1}; i++) {{
-        for (int j=i+1; j<{bench_freq}; j++) {{
-            if (times[j] < times[i]) {{
-                long long temp = times[i];
-                times[i] = times[j];
-                times[j] = temp;
-            }}
-        }}
-    }}
-    printf("Time: %.2lld ns\\n", times[{bench_freq//2}]);
-    for (int i=0; i<{sparse_rows * dense_cols}; i++) {{
-        printf("%.2f\\n", y[i]);
-    }}
-    free(y);
-    free(x);
-    free(csr_val);
-    free(indptr);
-    free(indices);
-}}"""
-    try:
-        with open(output_filename, 'w') as f:
-            f.write(c_code)
-        print(f"C program generated and saved to {output_filename}")
-        return output_filename
-    except Exception as e:
-        print(f"Error generating C program: {e}")
-        sys.exit(1)
-
-
-def generate_spmv_br_mispreds(csr_filename, vector_filename, rows, cols, nnz, output_filename, bench_freq):
-    c_code = f"""
-#include <stdio.h>
-#include <time.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-#include <papi.h>
-
-void spmv_sparse(double *restrict y, const double *restrict csr_val, const int *restrict indices, const int *restrict indptr, const double *restrict x, const int rpntr_size) {{
-	double sum = 0;
-    for (int i = 0; i < rpntr_size; i++) {{
-        sum = 0;
-		for (int j = indptr[i]; j < indptr[i+1]; j++) {{
-			sum += csr_val[j] * x[indices[j]];
-		}}
-        y[i] = sum;
-	}}
-}}
-
-int main() {{
-    int EventSet = PAPI_NULL;
-    if (PAPI_library_init(PAPI_VER_CURRENT) != PAPI_VER_CURRENT) {{
-        fprintf(stderr, "PAPI library init error!\\n");
-        exit(1);
-    }}
-    if (PAPI_create_eventset(&EventSet) != PAPI_OK) {{
-        fprintf(stderr, "PAPI_create_eventset failed\\n");
-        exit(1);
-    }}
-    int events[] = {{
-        PAPI_BR_MSP, PAPI_BR_CN
-    }};
-    int num_events = sizeof(events) / sizeof(events[0]);
-    for (int i = 0; i < num_events; i++) {{
-        if (PAPI_add_event(EventSet, events[i]) != PAPI_OK) {{
-            fprintf(stderr, "PAPI_add_event failed for event %d\\n", events[i]);
-            exit(1);
-        }}
-    }}
-    double *y = (double*)malloc({rows} * sizeof(double));
-    double *x = (double*)malloc({cols} * sizeof(double));
-    double *csr_val = (double*)malloc({nnz} * sizeof(double));
-    int *indices = (int*)malloc({nnz} * sizeof(int));
-    int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
-    struct timespec t1, t2;
-    long long event_times[{bench_freq}][num_events];
-    float times[{bench_freq}];
-    for (int i=0; i<{bench_freq}; i++) {{
-        FILE *file1 = fopen("{csr_filename}", "r");
-        if (file1 == NULL) {{
-            perror("Error opening file1");
-            exit(EXIT_FAILURE);
-        }}
-        FILE *file2 = fopen("Generated_dense_tensors/{vector_filename}", "r");
-        if (file2 == NULL) {{
-            perror("Error opening file2");
-            exit(EXIT_FAILURE);
-        }}
-        memset(x, 0, sizeof(double)*{cols});
-        memset(csr_val, 0, sizeof(double)*{nnz});
-        memset(indices, 0, sizeof(int)*{nnz});
-        memset(indptr, 0, sizeof(int)*({rows} + 1));
-        char c;
-        int x_size=0, val_size=0;
-        assert(fscanf(file1, "indptr=[%c", &c) == 1);
-        if (c != ']') {{
-            ungetc(c, file1);
-            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
-            val_size++;
-            while (1) {{
-                assert(fscanf(file1, "%c", &c) == 1);
-                if (c == ',') {{
-                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
-                    val_size++;
-                }} else if (c == ']') {{
-                    break;
-                }} else {{
-                    assert(0);
-                }}
-            }}
-        }}
-        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
-        val_size=0;
-        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
-        val_size++;
-        while (1) {{
-            assert(fscanf(file1, "%c", &c) == 1);
-            if (c == ',') {{
-                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
-                val_size++;
-            }} else if (c == ']') {{
-                break;
-            }} else {{
-                assert(0);
-            }}
-        }}
-        if(fscanf(file1, "%c", &c));
-        assert(c=='\\n');
-        val_size=0;
-        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
-        val_size++;
-        while (1) {{
-            assert(fscanf(file1, "%c", &c) == 1);
-            if (c == ',') {{
-                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
-                val_size++;
-            }} else if (c == ']') {{
-                break;
-            }} else {{
-                assert(0);
-            }}
-        }}
-        fclose(file1);
-        while (x_size < {cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
-            x_size++;
-        }}
-        fclose(file2);
-        memset(y, 0, sizeof(double)*{rows});
-        if (PAPI_start(EventSet) != PAPI_OK) {{
-            fprintf(stderr, "PAPI_start failed\\n");
-            exit(1);
-        }}
-        spmv_sparse(y, csr_val, indices, indptr, x, {rows});
-        if (PAPI_stop(EventSet, event_times[i]) != PAPI_OK) {{
-            fprintf(stderr, "PAPI_stop failed\\n");
-            exit(1);
-        }}
-        times[i] = ((float)event_times[i][0]/event_times[i][1])*100;
-    }}
-    for (int i=0; i<{bench_freq - 1}; i++) {{
-        for (int j=i+1; j<{bench_freq}; j++) {{
-            if (times[j] < times[i]) {{
-                float temp = times[i];
-                times[i] = times[j];
-                times[j] = temp;
-            }}
-        }}
-    }}
-    printf("Time: %.2lf ns\\n", times[{bench_freq//2}]);
-    for (int i=0; i<{rows}; i++) {{
-        printf("%.2f\\n", y[i]);
-    }}
-    free(y);
-    free(x);
-    free(csr_val);
-    free(indptr);
-    free(indices);
-}}"""
-    try:
-        with open(output_filename, 'w') as f:
-            f.write(c_code)
-        print(f"C program generated and saved to {output_filename}")
-        return output_filename
-    except Exception as e:
-        print(f"Error generating C program: {e}")
-        sys.exit(1)
-
-def generate_spmm_timing(csr_filename, matrix_filename, sparse_rows, sparse_cols, dense_cols, nnz, output_filename, bench_freq):
-    c_code = f"""
-#include <stdio.h>
-#include <time.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-
-void spmm_sparse(double *restrict y, const double *restrict csr_val, const int *restrict indices, const int *restrict indptr, const double *restrict x, const int sparse_rows, const int dense_cols) {{
-    for (int i = 0; i < sparse_rows; i++) {{
-        for (int p = indptr[i]; p < indptr[i+1]; p++) {{
-            int col = indices[p];
-            double val = csr_val[p];
-            for (int j = 0; j < dense_cols; ++j) {{
-                y[i * dense_cols + j] += val * x[col * dense_cols + j];
-            }}
-        }}
-    }}
-}}
-
-int main() {{
-    double *y = (double*)malloc({sparse_rows*dense_cols}*sizeof(double));
-    double *x = (double*)malloc({sparse_cols*dense_cols}*sizeof(double));
-    double *csr_val = (double*)malloc({nnz}*sizeof(double));
-    int *indices = (int*)malloc({nnz}*sizeof(int));
-    int *indptr = (int*)malloc(({sparse_rows + 1}) * sizeof(int));
-    struct timespec t1, t2;
-    double times[{bench_freq}];
-    for (int i = 0; i < {bench_freq}; i++) {{
-        FILE *file1 = fopen("{csr_filename}", "r");
-        if (file1 == NULL) {{
-            perror("Error opening file1\\n");
-            exit(EXIT_FAILURE);
-        }}
-        FILE *file2 = fopen("Generated_dense_tensors/{matrix_filename}", "r");
-        if (file2 == NULL) {{
-            perror("Error opening file2\\n");
-            exit(EXIT_FAILURE);
-        }}
-        memset(x, 0, sizeof(double)*{sparse_cols*dense_cols});
-        memset(csr_val, 0, sizeof(double)*{nnz});
-        memset(indices, 0, sizeof(int)*{nnz});
-        memset(indptr, 0, sizeof(int)*({sparse_rows} + 1));
-        char c;
-        int x_size=0, val_size=0;
-        assert(fscanf(file1, "indptr=[%c", &c) == 1);
-        if (c != ']') {{
-            ungetc(c, file1);
-            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
-            val_size++;
-            while (1) {{
-                assert(fscanf(file1, "%c", &c) == 1);
-                if (c == ',') {{
-                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
-                    val_size++;
-                }} else if (c == ']') {{
-                    break;
-                }} else {{
-                    assert(0);
-                }}
-            }}
-        }}
-        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
-        val_size=0;
-        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
-        val_size++;
-        while (1) {{
-            assert(fscanf(file1, "%c", &c) == 1);
-            if (c == ',') {{
-                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
-                val_size++;
-            }} else if (c == ']') {{
-                break;
-            }} else {{
-                assert(0);
-            }}
-        }}
-        if(fscanf(file1, "%c", &c));
-        assert(c=='\\n');
-        val_size=0;
-        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
-        val_size++;
-        while (1) {{
-            assert(fscanf(file1, "%c", &c) == 1);
-            if (c == ',') {{
-                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
-                val_size++;
-            }} else if (c == ']') {{
-                break;
-            }} else {{
-                assert(0);
-            }}
-        }}
-        fclose(file1);
-        while (x_size < {sparse_cols*dense_cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
-            x_size++;
-        }}
-        fclose(file2);
-        memset(y, 0, sizeof(double)*{sparse_rows*dense_cols});
-        clock_gettime(CLOCK_MONOTONIC, &t1);
-        spmm_sparse(y, csr_val, indices, indptr, x, {sparse_rows}, {dense_cols});
-        clock_gettime(CLOCK_MONOTONIC, &t2);
-        times[i] = (t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec);
-    }}
-    for (int i=0; i<{bench_freq-1}; i++) {{
-        for (int j=i+1; j<{bench_freq}; j++) {{
-            if (times[j] < times[i]) {{
-                double temp = times[i];
-                times[i] = times[j];
-                times[j] = temp;
-            }}
-        }}
-    }}
-    printf("Time: %.2f ns\\n", times[{bench_freq // 2}]);
-    for (int i=0; i<{sparse_rows * dense_cols}; i++) {{
-        printf("%.2f\\n", y[i]);
-    }}
-    free(y);
-    free(x);
-    free(csr_val);
-    free(indptr);
-    free(indices);
-}}"""
-    try:
-        with open(output_filename, 'w') as f:
-            f.write(c_code)
-        print(f"C program generated and saved to {output_filename}")
-        return output_filename
-    except Exception as e:
-        print(f"Error generating C program: {e}")
-        sys.exit(1)
-
-
-def generate_spmv_timing(csr_filename, vector_filename, rows, cols, nnz, output_filename, bench_freq):
-    c_code = f"""
-#include <stdio.h>
-#include <time.h>
-#include <stdlib.h>
-#include <string.h>
-#include <assert.h>
-
-void spmv_sparse(double *restrict y, const double *restrict csr_val, const int *restrict indices, const int *restrict indptr, const double *restrict x, const int rpntr_size) {{
-	double sum = 0;
-    for (int i = 0; i < rpntr_size; i++) {{
-        sum = 0;
-		for (int j = indptr[i]; j < indptr[i+1]; j++) {{
-			sum += csr_val[j] * x[indices[j]];
-		}}
-        y[i] = sum;
-	}}
-}}
-
-int main() {{
-    double *y = (double*)malloc({rows} * sizeof(double));
-    double *x = (double*)malloc({cols} * sizeof(double));
-    double *csr_val = (double*)malloc({nnz} * sizeof(double));
-    int *indices = (int*)malloc({nnz} * sizeof(int));
-    int *indptr = (int*)malloc(({rows} + 1) * sizeof(int));
-    struct timespec t1, t2;
-    double times[{bench_freq}];
-    for (int i=0; i<{bench_freq}; i++) {{
-        FILE *file1 = fopen("{csr_filename}", "r");
-        if (file1 == NULL) {{
-            perror("Error opening file1");
-            exit(EXIT_FAILURE);
-        }}
-        FILE *file2 = fopen("Generated_dense_tensors/{vector_filename}", "r");
-        if (file2 == NULL) {{
-            perror("Error opening file2");
-            exit(EXIT_FAILURE);
-        }}
-        memset(x, 0, sizeof(double)*{cols});
-        memset(csr_val, 0, sizeof(double)*{nnz});
-        memset(indices, 0, sizeof(int)*{nnz});
-        memset(indptr, 0, sizeof(int)*({rows} + 1));
-        char c;
-        int x_size=0, val_size=0;
-        assert(fscanf(file1, "indptr=[%c", &c) == 1);
-        if (c != ']') {{
-            ungetc(c, file1);
-            assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
-            val_size++;
-            while (1) {{
-                assert(fscanf(file1, "%c", &c) == 1);
-                if (c == ',') {{
-                    assert(fscanf(file1, "%d", &indptr[val_size]) == 1);
-                    val_size++;
-                }} else if (c == ']') {{
-                    break;
-                }} else {{
-                    assert(0);
-                }}
-            }}
-        }}
-        assert(fscanf(file1, "%c", &c) == 1 && c == '\\n');
-        val_size=0;
-        assert(fscanf(file1, "indices=[%d", &indices[val_size]) == 1.0);
-        val_size++;
-        while (1) {{
-            assert(fscanf(file1, "%c", &c) == 1);
-            if (c == ',') {{
-                assert(fscanf(file1, "%d", &indices[val_size]) == 1.0);
-                val_size++;
-            }} else if (c == ']') {{
-                break;
-            }} else {{
-                assert(0);
-            }}
-        }}
-        if(fscanf(file1, "%c", &c));
-        assert(c=='\\n');
-        val_size=0;
-        assert(fscanf(file1, "data=[%lf", &csr_val[val_size]) == 1.0);
-        val_size++;
-        while (1) {{
-            assert(fscanf(file1, "%c", &c) == 1);
-            if (c == ',') {{
-                assert(fscanf(file1, "%lf", &csr_val[val_size]) == 1.0);
-                val_size++;
-            }} else if (c == ']') {{
-                break;
-            }} else {{
-                assert(0);
-            }}
-        }}
-        fclose(file1);
-        while (x_size < {cols} && fscanf(file2, "%lf,", &x[x_size]) == 1) {{
-            x_size++;
-        }}
-        fclose(file2);
-        memset(y, 0, sizeof(double)*{rows});
-        clock_gettime(CLOCK_MONOTONIC, &t1);
-        spmv_sparse(y, csr_val, indices, indptr, x, {rows});
-        clock_gettime(CLOCK_MONOTONIC, &t2);
-        times[i] = (t2.tv_sec - t1.tv_sec) * 1e9 + (t2.tv_nsec - t1.tv_nsec);
-    }}
-    for (int i=0; i<{bench_freq - 1}; i++) {{
-        for (int j=i+1; j<{bench_freq}; j++) {{
-            if (times[j] < times[i]) {{
-                double temp = times[i];
-                times[i] = times[j];
-                times[j] = temp;
-            }}
-        }}
-    }}
-    printf("Time: %.2f ns\\n", times[{bench_freq // 2}]);
-    for (int i=0; i<{rows}; i++) {{
-        printf("%.2f\\n", y[i]);
-    }}
-    free(y);
-    free(x);
-    free(csr_val);
-    free(indptr);
-    free(indices);
-}}"""
-    try:
-        with open(output_filename, 'w') as f:
-            f.write(c_code)
-        print(f"C program generated and saved to {output_filename}")
-        return output_filename
-    except Exception as e:
-        print(f"Error generating C program: {e}")
-        sys.exit(1)
 
 def csr_operation(csr_filepath, operation_type, bench_freq, result_type):
+    if operation_type != "SpMV":
+        raise Exception(f"Invalid operation type: {operation_type}")
 
     if result_type == "br_mispreds":
-        spmv_func = generate_spmv_br_mispreds
-        spmm_func = generate_spmm_br_mispreds
+        executable_name = "/local/scratch/a/das160/csr-spmv-simple-codegen/CSR5_avx2/spmv_branch"
     elif result_type == "timing":
-        spmv_func = generate_spmv_timing
-        spmm_func = generate_spmm_timing
+        executable_name = "/local/scratch/a/das160/csr-spmv-simple-codegen/CSR5_avx2/spmv_time"
     else:
         raise Exception(f"Invalid result type: {result_type}")
     
     print(f"\n{'='*80}")
     print(f"Processing: {csr_filepath}")
     print(f"{'='*80}")
-
-    # Read CSR file to get dimensions
-    rows, cols, nnz = read_csr_file(csr_filepath)
-    
-    if operation_type == 'spmm':
-        # Generate dense matrix for SpMM
-        write_dense_matrix(1.0, cols, 512)
-        tensor_filename = f"generated_matrix_{cols}x{512}.matrix"
-        
-        # Generate C program for SpMM
-        c_filename = spmm_func(
-            csr_filepath,
-            tensor_filename,
-            rows,
-            cols, 512,
-            nnz=nnz,
-            output_filename="spmm.c",
-            bench_freq=bench_freq
-        )
-        executable_name = "spmm"
-    else:  # spmv
-        # Generate dense vector for SpMV
-        write_dense_vector(1.0, cols)
-        tensor_filename = f"generated_vector_{cols}.vector"
-        
-        # Generate C program for SpMV
-        c_filename = spmv_func(
-            csr_filepath,
-            tensor_filename,
-            rows=rows,
-            cols=cols,
-            nnz=nnz,
-            output_filename="spmv.c",
-            bench_freq=bench_freq
-        )
-        executable_name = "spmv"
-    
-    # Compile and execute
-    if c_filename and compile_c_program(c_filename, executable_name):
-        return execute_program(executable_name)
-    else:
-        print(f"Skipping execution for {csr_filepath}_{operation_type} due to compilation failure.")
-        return False
+    return execute_program(executable_name, csr_filepath)
 
 def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, result_type):
     if result_type == "br_mispreds":
@@ -774,12 +171,12 @@ def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, res
     timing_results = {}
     
     # Process original matrix (100%)
-    timing_results[100] = csr_operation(f"csr_files/{matrix}.csr", operation_type, bench_freq, result_type)
+    timing_results[100] = csr_operation(f"matrices/{matrix}.mtx", operation_type, bench_freq, result_type)
     
     # Process reduced CSR files
-    csr_files = glob.glob(f"csr_files/{matrix}_{reduction_type}_*pct.csr")
+    csr_files = glob.glob(f"csr_files/{matrix}_{reduction_type}_*pct.mtx")
     for csr_file in csr_files:
-        reduction_pct = csr_file.split(f"{reduction_type}_")[1].split("pct.csr")[0]
+        reduction_pct = csr_file.split(f"{reduction_type}_")[1].split("pct.mtx")[0]
         percentage = 100 - int(reduction_pct)
         timing_results[percentage] = csr_operation(csr_file, operation_type, bench_freq, result_type)
 
@@ -796,12 +193,3 @@ def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, res
             if time is not False and time is not None:
                 # print(percentage, time)
                 writer.writerow([percentage, f"{time:.6f}"])
-
-if __name__ == "__main__":
-    matrices = [p.stem for p in Path("matrices").glob("*.mtx")]
-    ops = ["spmv", "spmm"]
-    reduction_types = ["random", "truncated", "consec"]
-    for matrix in matrices:
-        for op in ops:
-            for reduction_type in reduction_types:
-                run_sparse_operation(matrix, op, reduction_type, 100, "br_mispreds")

@@ -7,3 +7,4 @@ spmm
 *.pyc
 matrices/
 *.out
+*.mtx
