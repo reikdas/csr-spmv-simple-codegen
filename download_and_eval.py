@@ -59,31 +59,33 @@ if __name__ == "__main__":
 
                 create_csr_variants(mat.name)
 
-                run_sparse_operation(mat.name, "SpMV", "random", 100, "br_mispreds")
-                run_sparse_operation(mat.name, "SpMV", "random", 100, "timing")
+                # run_sparse_operation(mat.name, "SpMV", "random", 100, "br_mispreds")
+                # Run timing with 100000 iterations and record variance
+                run_sparse_operation(mat.name, "SpMV", "random", 100000, "timing")
 
-                br_mispreds_result_file = os.path.join(results_dir, f"papi_{mat.name}_SpMV_random.csv")
+                # br_mispreds_result_file = os.path.join(results_dir, f"papi_{mat.name}_SpMV_random.csv")
                 timing_result_file = os.path.join(results_dir, f"timing_{mat.name}_SpMV_random.csv")
 
                 percentages = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10]
                 mispreds = []
                 timings = []
-                with open(br_mispreds_result_file, 'r') as f:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        mispreds.append(float(row['branch_mispreds']))
+                # with open(br_mispreds_result_file, 'r') as f:
+                #     reader = csv.DictReader(f)
+                #     for row in reader:
+                #         mispreds.append(float(row['branch_mispreds']))
 
                 with open(timing_result_file, 'r') as f:
                     reader = csv.DictReader(f)
                     for row in reader:
                         timings.append(float(row['time']))
 
-                high_br_mispreds = any(mispred > 1.0 for mispred in mispreds)
+                # high_br_mispreds = any(mispred > 1.0 for mispred in mispreds)
                 nnz_speedup = all(timings[i] > timings[i+1] for i in range(len(timings)-1))
 
-                diff_br_mispreds = max(mispreds[i] - mispreds[0] for i in range(1, len(mispreds)))
+                # diff_br_mispreds = max(mispreds[i] - mispreds[0] for i in range(1, len(mispreds)))
 
-                fmatrix.write(f"{mat.name},{high_br_mispreds},{nnz_speedup},{diff_br_mispreds}\n")
+                # fmatrix.write(f"{mat.name},{high_br_mispreds},{nnz_speedup},{diff_br_mispreds}\n")
+                fmatrix.write(f"{mat.name},{nnz_speedup}\n")
                 fmatrix.flush()
 
                 # Delete the variants created in the csr_files directory

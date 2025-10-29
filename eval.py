@@ -94,17 +94,20 @@ def execute_program(executable_name="spmv"):
         result = subprocess.run([f"./{executable_name}"], capture_output=True, text=True, check=True)
         
         print(f"✓ Execution successful!")
-        
-        # Extract timing information from output
+        # Extract timing information from output (may be median and variance)
         timing_info = extract_timing(result.stdout)
         if timing_info is not None:
+            median, variance = timing_info
             print("\n" + "=" * 60)
             print("RESULTS")
             print("=" * 60)
-            print(f"{timing_info:.6f}")
+            if median is not None:
+                print(f"Median Time: {median:.6f}")
+            if variance is not None:
+                print(f"Variance: {variance:.6f}")
             print("=" * 60)
             return timing_info
-        return None
+        return (None, None)
     except subprocess.CalledProcessError as e:
         print(f"✗ Execution failed:")
         print(f"Error output: {e.stderr}")
@@ -118,15 +121,25 @@ def execute_program(executable_name="spmv"):
 def extract_timing(output_text):
     """Extract timing information from the program output."""
     try:
-        # Look for the median timing line in the output
+        # Extract median timing and variance (if available)
+        median = None
+        variance = None
         for line in output_text.split('\n'):
             if "Time:" in line:
-                # Extract the time value
                 time_str = line.split(":")[-1].strip().split()[0]
-                return float(time_str)
-        return None
+                try:
+                    median = float(time_str)
+                except Exception:
+                    median = None
+            if "Variance:" in line:
+                var_str = line.split(":")[-1].strip().split()[0]
+                try:
+                    variance = float(var_str)
+                except Exception:
+                    variance = None
+        return (median, variance)
     except (ValueError, IndexError):
-        return None
+        return (None, None)
     
 def generate_spmm_br_mispreds(csr_filename, matrix_filename, sparse_rows, sparse_cols, dense_cols, nnz, output_filename, bench_freq):
     c_code = f"""
@@ -552,7 +565,18 @@ int main() {{
             }}
         }}
     }}
-    printf("Time: %.2f ns\\n", times[{bench_freq // 2}]);
+    // compute mean and variance
+    double mean = 0.0;
+    for (int i = 0; i < {bench_freq}; i++) {{ mean += times[i]; }}
+    mean = mean / (double){bench_freq};
+    double var = 0.0;
+    if ({bench_freq} > 1) {{
+        for (int i = 0; i < {bench_freq}; i++) {{ double d = times[i] - mean; var += d * d; }}
+        var = var / (double)({bench_freq} - 1);
+    }}
+    printf("Time: %.2f ns\n", times[{bench_freq // 2}]);
+    printf("Mean: %.6f ns\n", mean);
+    printf("Variance: %.6f\n", var);
     for (int i=0; i<{sparse_rows * dense_cols}; i++) {{
         printf("%.2f\\n", y[i]);
     }}
@@ -684,7 +708,18 @@ int main() {{
             }}
         }}
     }}
+    // compute mean and variance
+    double mean = 0.0;
+    for (int i = 0; i < {bench_freq}; i++) {{ mean += times[i]; }}
+    mean = mean / (double){bench_freq};
+    double var = 0.0;
+    if ({bench_freq} > 1) {{
+        for (int i = 0; i < {bench_freq}; i++) {{ double d = times[i] - mean; var += d * d; }}
+        var = var / (double)({bench_freq} - 1);
+    }}
     printf("Time: %.2f ns\\n", times[{bench_freq // 2}]);
+    printf("Mean: %.6f ns\\n", mean);
+    printf("Variance: %.6f\\n", var);
     for (int i=0; i<{rows}; i++) {{
         printf("%.2f\\n", y[i]);
     }}
@@ -784,9 +819,14 @@ def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, res
         timing_results[percentage] = csr_operation(csr_file, operation_type, bench_freq, result_type)
 
     # Write results to CSV
+    # For timing results include variance column
+    if result_type == "timing":
+        header = ['Percentage', col_name, 'variance']
+    else:
+        header = ['Percentage', col_name]
     with open(f"results/{f_name}_{matrix}_{operation_type}_{reduction_type}.csv", "w", newline='') as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Percentage', col_name])
+        writer.writerow(header)
         
         # Sort results by percentage (descending)
         sorted_results = sorted(timing_results.items(), key=lambda x: x[0], reverse=True)
@@ -794,8 +834,18 @@ def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, res
         
         for percentage, time in sorted_results:
             if time is not False and time is not None:
-                # print(percentage, time)
-                writer.writerow([percentage, f"{time:.6f}"])
+                # time may be a tuple (median, variance) for timing results
+                if result_type == "timing" and isinstance(time, (tuple, list)):
+                    median, variance = time
+                    median_str = f"{median:.6f}" if median is not None else ""
+                    variance_str = f"{variance:.6f}" if variance is not None else ""
+                    writer.writerow([percentage, median_str, variance_str])
+                else:
+                    # legacy single-value result
+                    try:
+                        writer.writerow([percentage, f"{float(time):.6f}"])
+                    except Exception:
+                        writer.writerow([percentage, time])
 
 if __name__ == "__main__":
     matrices = [p.stem for p in Path("matrices").glob("*.mtx")]
