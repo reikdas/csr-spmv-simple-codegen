@@ -670,6 +670,10 @@ int main() {{
         }}
         fclose(file2);
         memset(y, 0, sizeof(double)*{rows});
+        for (int i=0; i<300; i++) {{
+            spmv_sparse(y, csr_val, indices, indptr, x, {rows});
+        }}
+        memset(y, 0, sizeof(double)*{rows});
         clock_gettime(CLOCK_MONOTONIC, &t1);
         spmv_sparse(y, csr_val, indices, indptr, x, {rows});
         clock_gettime(CLOCK_MONOTONIC, &t2);
