@@ -799,9 +799,12 @@ def run_sparse_operation(matrix, operation_type, reduction_type, bench_freq, res
 
 if __name__ == "__main__":
     matrices = [p.stem for p in Path("matrices").glob("*.mtx")]
-    ops = ["spmv", "spmm"]
-    reduction_types = ["random", "truncated", "consec"]
+    # ops = ["spmv", "spmm"]
+    ops = ["spmv"]
+    # reduction_types = ["random", "truncated", "consec"]
+    reduction_types = ["random"]
     for matrix in matrices:
         for op in ops:
             for reduction_type in reduction_types:
-                run_sparse_operation(matrix, op, reduction_type, 100, "br_mispreds")
+                # run_sparse_operation(matrix, op, reduction_type, 100, "br_mispreds")
+                run_sparse_operation(matrix, op, reduction_type, 100, "timing")

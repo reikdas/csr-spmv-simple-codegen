@@ -210,23 +210,23 @@ def create_csr_variants(matrix):
         variant_lines[idx_indptr] = format_array("indptr", new_indptr)
         write_csr_lines(output_filename, variant_lines)
 
-        keep_fraction = 1.0 - fraction
+        # keep_fraction = 1.0 - fraction
 
-        new_val, new_indices, new_indptr = truncate_csr(csr_val, indices, indptr, keep_fraction)
-        output_filename = f"csr_files/{matrix}_truncated_{pct}pct.csr"
-        variant_lines = lines.copy()
-        variant_lines[idx_val] = format_array("data", new_val)
-        variant_lines[idx_indices] = format_array("indices", new_indices)
-        variant_lines[idx_indptr] = format_array("indptr", new_indptr)
-        write_csr_lines(output_filename, variant_lines)
+        # new_val, new_indices, new_indptr = truncate_csr(csr_val, indices, indptr, keep_fraction)
+        # output_filename = f"csr_files/{matrix}_truncated_{pct}pct.csr"
+        # variant_lines = lines.copy()
+        # variant_lines[idx_val] = format_array("data", new_val)
+        # variant_lines[idx_indices] = format_array("indices", new_indices)
+        # variant_lines[idx_indptr] = format_array("indptr", new_indptr)
+        # write_csr_lines(output_filename, variant_lines)
 
-        new_val, new_indices, new_indptr = truncate_consec_csr(csr_val, indices, indptr, keep_fraction)
-        output_filename = f"csr_files/{matrix}_consec_{pct}pct.csr"
-        variant_lines = lines.copy()
-        variant_lines[idx_val] = format_array("data", new_val)
-        variant_lines[idx_indices] = format_array("indices", new_indices)
-        variant_lines[idx_indptr] = format_array("indptr", new_indptr)
-        write_csr_lines(output_filename, variant_lines)
+        # new_val, new_indices, new_indptr = truncate_consec_csr(csr_val, indices, indptr, keep_fraction)
+        # output_filename = f"csr_files/{matrix}_consec_{pct}pct.csr"
+        # variant_lines = lines.copy()
+        # variant_lines[idx_val] = format_array("data", new_val)
+        # variant_lines[idx_indices] = format_array("indices", new_indices)
+        # variant_lines[idx_indptr] = format_array("indptr", new_indptr)
+        # write_csr_lines(output_filename, variant_lines)
 
 
 if __name__ == "__main__":
