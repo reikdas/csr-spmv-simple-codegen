@@ -35,13 +35,15 @@ def write_per_matrix_csvs():
             time_val = float(time_str)
 
             # Interpret names like `{matrix}_random_{num}pct` or bare `{matrix}`
+            # Note: pct in filename means % removed, so actual % kept = 100 - pct
             if "_random_" in name:
                 base, tail = name.split("_random_", 1)
                 # tail expected like '90pct'
                 if tail.endswith("pct"):
                     pct_str = tail[:-3]
                     try:
-                        pct = int(pct_str)
+                        pct_removed = int(pct_str)
+                        pct = 100 - pct_removed  # Convert to % kept
                     except ValueError:
                         # fallback: mark as unknown (skip)
                         continue
