@@ -162,35 +162,19 @@ def save_csr_to_file(matrix_name):
         os.mkdir("csr_files")
     csr_matrix = scipy.io.mmread(f"matrices/{matrix_name}.mtx")
     csr_matrix = csr_matrix.tocsr()
+    # Also save the original matrix into csr_files as a .mtx
     try:
-        with open(f"csr_files/{matrix_name}.csr", 'w') as f:
-            # Write indptr (row pointers)
-            f.write("indptr=[")
-            f.write(",".join(map(str, csr_matrix.indptr)))
-            f.write("]\n")
-            
-            # Write indices (column indices)
-            f.write("indices=[")
-            f.write(",".join(map(str, csr_matrix.indices)))
-            f.write("]\n")
-            
-            # Write data (matrix values)
-            f.write("data=[")
-            f.write(",".join(map(str, csr_matrix.data)))
-            f.write("]\n")
-        
+        scipy.io.mmwrite(f"csr_files/{matrix_name}.mtx", csr_matrix)
     except Exception as e:
-        print(f"Error saving CSR matrix: {e}")
+        print(f"Error saving original matrix as .mtx: {e}")
 
 def create_csr_variants(matrix):
+    # Load original matrix and save it once
     save_csr_to_file(matrix)
-    lines = load_csr_lines(f"csr_files/{matrix}.csr")
-    idx_indptr = find_line_index(lines, "indptr")
-    idx_indices = find_line_index(lines, "indices")
-    idx_val = find_line_index(lines, "data")
-    indptr = parse_array(lines[idx_indptr], "indptr", int)
-    indices = parse_array(lines[idx_indices], "indices", int)
-    csr_val = parse_array(lines[idx_val], "data", float)
+    csr_matrix = scipy.io.mmread(f"matrices/{matrix}.mtx").tocsr()
+    indptr = csr_matrix.indptr.tolist()
+    indices = csr_matrix.indices.tolist()
+    csr_val = csr_matrix.data.tolist()
     for pct in [10, 20, 30, 40, 50, 60, 70, 80, 90]:
         fraction = pct / 100.0
         
@@ -198,35 +182,32 @@ def create_csr_variants(matrix):
         mask = sampled_removal_mask(indptr, fraction, 42) # Hardcoded seed for reproducibility
         new_val, new_indices, new_indptr = apply_mask_to_csr(csr_val, indices, indptr, mask)
 
-        # Create output filename
-        output_filename = f"csr_files/{matrix}_random_{pct}pct.csr"
+        # Create output filename (.mtx Matrix Market)
+        output_filename = f"csr_files/{matrix}_random_{pct}pct.mtx"
 
-        # Create a copy of lines for this variant
-        variant_lines = lines.copy()
-        
-        # Replace lines; keep original formatting/order otherwise
-        variant_lines[idx_val] = format_array("data", new_val)
-        variant_lines[idx_indices] = format_array("indices", new_indices)
-        variant_lines[idx_indptr] = format_array("indptr", new_indptr)
-        write_csr_lines(output_filename, variant_lines)
+        # Build a new CSR matrix and write it as Matrix Market
+        try:
+            new_csr = scipy.sparse.csr_matrix((new_val, new_indices, new_indptr), shape=csr_matrix.shape)
+            scipy.io.mmwrite(output_filename, new_csr)
+        except Exception as e:
+            print(f"Error writing randomized variant {output_filename}: {e}")
 
-        keep_fraction = 1.0 - fraction
+        # keep_fraction = 1.0 - fraction
+        # new_val, new_indices, new_indptr = truncate_csr(csr_val, indices, indptr, keep_fraction)
+        # output_filename = f"csr_files/{matrix}_truncated_{pct}pct.mtx"
+        # try:
+        #     new_csr = scipy.sparse.csr_matrix((new_val, new_indices, new_indptr), shape=csr_matrix.shape)
+        #     scipy.io.mmwrite(output_filename, new_csr)
+        # except Exception as e:
+        #     print(f"Error writing truncated variant {output_filename}: {e}")
 
-        new_val, new_indices, new_indptr = truncate_csr(csr_val, indices, indptr, keep_fraction)
-        output_filename = f"csr_files/{matrix}_truncated_{pct}pct.csr"
-        variant_lines = lines.copy()
-        variant_lines[idx_val] = format_array("data", new_val)
-        variant_lines[idx_indices] = format_array("indices", new_indices)
-        variant_lines[idx_indptr] = format_array("indptr", new_indptr)
-        write_csr_lines(output_filename, variant_lines)
-
-        new_val, new_indices, new_indptr = truncate_consec_csr(csr_val, indices, indptr, keep_fraction)
-        output_filename = f"csr_files/{matrix}_consec_{pct}pct.csr"
-        variant_lines = lines.copy()
-        variant_lines[idx_val] = format_array("data", new_val)
-        variant_lines[idx_indices] = format_array("indices", new_indices)
-        variant_lines[idx_indptr] = format_array("indptr", new_indptr)
-        write_csr_lines(output_filename, variant_lines)
+        # new_val, new_indices, new_indptr = truncate_consec_csr(csr_val, indices, indptr, keep_fraction)
+        # output_filename = f"csr_files/{matrix}_consec_{pct}pct.mtx"
+        # try:
+        #     new_csr = scipy.sparse.csr_matrix((new_val, new_indices, new_indptr), shape=csr_matrix.shape)
+        #     scipy.io.mmwrite(output_filename, new_csr)
+        # except Exception as e:
+        #     print(f"Error writing consecutive-truncate variant {output_filename}: {e}")
 
 
 if __name__ == "__main__":
