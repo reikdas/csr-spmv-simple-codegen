@@ -6,11 +6,19 @@ EXEC_DIR = os.path.join(BASE_PATH, "spv8-public", "data")
 
 def extract_timing(output_text):
     """Extract timing information from the program output."""
+    time_val = None
+    
     for line in output_text.split('\n'):
         if "Time:" in line:
             # Extract the time value
             time_str = line.split(":")[-1].strip().split()[0]
-            return float(time_str)
+            time_val = float(time_str)
+        elif "Correct:" in line:
+            # Extract correctness
+            correct_str = line.split(":")[-1].strip()
+            assert(correct_str.lower() == "true")
+    
+    return time_val
 
 def write_per_matrix_csvs():
     results_file_path = os.path.join(BASE_PATH, "spv8_eval_results.txt")
