@@ -523,11 +523,13 @@ def fig_spv8_vs_naive_examples():
     timing_mkl   = load_sweep("sweep_matrices_mkl",    "timing")
     timing_spv8  = load_sweep("spv8", "timing")
 
-    # Three extreme anomaly matrices + one from SABLE 117-set
-    targets = ["epb1", "mark3jac040", "wang4", "shermanACb"]
+    # Match fig1 exactly: same six matrices
+    targets = ["epb1", "mark3jac040",
+               "shermanACb", "bbmat",
+               "orani678", "lp_osa_07"]
     available = [m for m in targets if m in timing_naive and m in timing_spv8]
 
-    fig, axes = plt.subplots(2, 2, figsize=(10, 7))
+    fig, axes = plt.subplots(2, 3, figsize=(13, 7))
     axes = axes.flatten()
 
     for ax, matrix in zip(axes, available):
