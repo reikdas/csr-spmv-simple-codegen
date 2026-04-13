@@ -106,11 +106,12 @@ def fig_timing_examples():
     timing = load_sweep("sweep_matrices_warmup", "timing")
     papi   = load_sweep("sweep_matrices_warmup", "papi")
 
-    # Pick 6 matrices spanning different degrees of anomaly
-    targets = ["epb1", "mark3jac040", "bloweybl", "TSOPF_FS_b9_c6",
-               "G27", "G39"]
-    # G27 and G39 come from the 34-matrix deep-dive set; normalise names
-    # (sweep_matrices_warmup uses the same names)
+    # Row 1: extreme anomaly matrices (not in SABLE eval set)
+    # Row 2: shermanACb, bbmat from SABLE 117-set (mild anomaly);
+    #         orani678, lp_osa_07 from SABLE 55-set (well-behaved)
+    targets = ["epb1", "mark3jac040",
+               "shermanACb", "bbmat",
+               "orani678", "lp_osa_07"]
     available = [m for m in targets if m in timing]
 
     fig, axes = plt.subplots(2, 3, figsize=(13, 7))
@@ -148,8 +149,8 @@ def fig_timing_examples():
         "Blue = normalised SpMV time, Red dashed = branch misprediction rate",
         fontsize=10)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
-    path = f"{OUT}/fig1_timing_anomaly_examples.png"
-    fig.savefig(path, dpi=150)
+    path = f"{OUT}/fig1_timing_anomaly_examples.pdf"
+    fig.savefig(path)
     plt.close(fig)
     print(f"Saved {path}")
 
@@ -194,8 +195,8 @@ def fig_mispred_modes():
         "Random removal drives mispredictions up; consecutive removal does not",
         fontsize=10)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
-    path = f"{OUT}/fig2_mispred_random_vs_consec.png"
-    fig.savefig(path, dpi=150)
+    path = f"{OUT}/fig2_mispred_random_vs_consec.pdf"
+    fig.savefig(path)
     plt.close(fig)
     print(f"Saved {path}")
 
@@ -229,8 +230,8 @@ def fig_slowdown_distribution():
         f"|  >3×: {n_very_severe} ({100*n_very_severe/n_total:.0f}%)")
     ax.legend()
     fig.tight_layout()
-    path = f"{OUT}/fig3_slowdown_distribution.png"
-    fig.savefig(path, dpi=150)
+    path = f"{OUT}/fig3_slowdown_distribution.pdf"
+    fig.savefig(path)
     plt.close(fig)
     print(f"Saved {path}")
 
@@ -271,8 +272,8 @@ def fig_slowdown_vs_mispred():
         f"n={len(xs)} SpMV matrices (sweep_matrices_warmup)")
     ax.legend()
     fig.tight_layout()
-    path = f"{OUT}/fig4_slowdown_vs_mispred_scatter.png"
-    fig.savefig(path, dpi=150)
+    path = f"{OUT}/fig4_slowdown_vs_mispred_scatter.pdf"
+    fig.savefig(path)
     plt.close(fig)
     print(f"Saved {path}")
 
@@ -335,8 +336,8 @@ def fig_spmv_vs_spmm():
 
     fig.suptitle("SpMV suffers timing anomaly; SpMM does not (limited data)", fontsize=11)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
-    path = f"{OUT}/fig5_spmv_vs_spmm.png"
-    fig.savefig(path, dpi=150)
+    path = f"{OUT}/fig5_spmv_vs_spmm.pdf"
+    fig.savefig(path)
     plt.close(fig)
     print(f"Saved {path}")
 
@@ -376,7 +377,7 @@ def fig_custom_vs_mkl():
     axes[0].hist(custom_sd, bins=bins, color="#1f77b4", edgecolor="white", linewidth=0.4)
     axes[0].axvline(1.0, color="red", linestyle="--", linewidth=1.4)
     axes[0].set_title(
-        f"Custom CSR SpMV (n={n})\n{n_custom_anom} ({100*n_custom_anom/n:.0f}%) anomalous")
+        f"Naive CSR SpMV (n={n})\n{n_custom_anom} ({100*n_custom_anom/n:.0f}%) anomalous")
     axes[0].set_xlabel("Peak slowdown factor"); axes[0].set_ylabel("Matrices")
 
     axes[1].hist(mkl_sd, bins=bins, color="#ff7f0e", edgecolor="white", linewidth=0.4)
@@ -386,12 +387,12 @@ def fig_custom_vs_mkl():
     axes[1].set_xlabel("Peak slowdown factor"); axes[1].set_ylabel("Matrices")
 
     fig.suptitle(
-        "Timing anomaly under random NNZ removal: Custom CSR vs Intel MKL\n"
+        "Timing anomaly under random NNZ removal: Naive CSR vs Intel MKL\n"
         "Both implementations are affected — the anomaly is algorithmic, not implementation-specific",
         fontsize=10)
     fig.tight_layout(rect=[0, 0, 1, 0.90])
-    path = f"{OUT}/fig6_custom_vs_mkl.png"
-    fig.savefig(path, dpi=150)
+    path = f"{OUT}/fig6_custom_vs_mkl.pdf"
+    fig.savefig(path)
     plt.close(fig)
     print(f"Saved {path}")
 
@@ -434,8 +435,8 @@ def fig_raw_mispred_heatmap():
         "Extra branch mispredictions introduced by random (vs consecutive) NNZ removal\n"
         "Red = random causes more mispredictions, Blue = fewer")
     fig.tight_layout()
-    path = f"{OUT}/fig7_raw_mispred_diff_heatmap.png"
-    fig.savefig(path, dpi=150)
+    path = f"{OUT}/fig7_raw_mispred_diff_heatmap.pdf"
+    fig.savefig(path)
     plt.close(fig)
     print(f"Saved {path}")
 
@@ -503,8 +504,62 @@ def fig_timing_mispred_panel():
         "consecutive removal keeps mispreds near zero",
         fontsize=10)
     fig.tight_layout(rect=[0, 0, 1, 0.94])
-    path = f"{OUT}/fig8_timing_and_mispred_panel.png"
-    fig.savefig(path, dpi=150)
+    path = f"{OUT}/fig8_timing_and_mispred_panel.pdf"
+    fig.savefig(path)
+    plt.close(fig)
+    print(f"Saved {path}")
+
+# ══════════════════════════════════════════════════════════════════════════
+#  FIGURE 11 – SpV8 vs Naive CSR for worst-case matrices
+# ══════════════════════════════════════════════════════════════════════════
+
+def fig_spv8_vs_naive_examples():
+    """
+    Compare Naive CSR (sweep_matrices_warmup), MKL (sweep_matrices_mkl),
+    and SpV8 (spv8/) timing for the four matrices with the worst
+    naive-CSR slowdowns.
+    """
+    timing_naive = load_sweep("sweep_matrices_warmup", "timing")
+    timing_mkl   = load_sweep("sweep_matrices_mkl",    "timing")
+    timing_spv8  = load_sweep("spv8", "timing")
+
+    # Three extreme anomaly matrices + one from SABLE 117-set
+    targets = ["epb1", "mark3jac040", "wang4", "shermanACb"]
+    available = [m for m in targets if m in timing_naive and m in timing_spv8]
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7))
+    axes = axes.flatten()
+
+    for ax, matrix in zip(axes, available):
+        series = [
+            ("Naive CSR", timing_naive, "#1f77b4", "o-"),
+            ("MKL",       timing_mkl,   "#2ca02c", "^:"),
+            ("SpV8",      timing_spv8,  "#ff7f0e", "s--"),
+        ]
+        for label, tdict, color, style in series:
+            if matrix not in tdict:
+                continue
+            pcts, times = sorted_series(tdict[matrix], "time")
+            t100 = times[0]
+            norm = [t / t100 for t in times]
+            ax.plot(pcts, norm, style, color=color, linewidth=1.8,
+                    markersize=4, label=label)
+
+        ax.axhline(1.0, color="grey", linestyle=":", linewidth=0.8)
+        ax.set_xlabel("NNZ remaining (%)")
+        ax.set_ylabel("Time (norm. to 100%)")
+        ax.set_title(matrix, fontsize=9, fontweight="bold")
+        ax.invert_xaxis()
+        ax.set_ylim(bottom=0)
+        ax.legend(fontsize=8)
+
+    fig.suptitle(
+        "Naive CSR vs MKL vs SpV8: worst-case anomaly matrices\n"
+        "SpV8 time decreases monotonically as NNZ are removed",
+        fontsize=10)
+    fig.tight_layout(rect=[0, 0, 1, 0.93])
+    path = f"{OUT}/fig11_spv8_vs_custom_examples.pdf"
+    fig.savefig(path)
     plt.close(fig)
     print(f"Saved {path}")
 
@@ -567,5 +622,6 @@ if __name__ == "__main__":
     fig_custom_vs_mkl()
     fig_raw_mispred_heatmap()
     fig_timing_mispred_panel()
+    fig_spv8_vs_naive_examples()
     print_summary_stats()
     print(f"\nAll figures saved to {OUT}/")
